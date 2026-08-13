@@ -144,6 +144,22 @@ cd ~/workspace/nextui-music-player/src
 make clean && make PLATFORM=tg5040
 ```
 
+### Packaging a Release Folder
+
+Once binaries are built (`sh build-tg5040.sh` / `sh build-tg5050.sh`), assemble a
+deployable pak folder locally:
+
+```bash
+python3 create_dist.py            # both platforms -> dist/Music Player.pak/
+python3 create_dist.py --zip      # also write dist/Music.Player.pak.zip
+```
+
+Copy `dist/Music Player.pak/` straight to `/Tools/<PLATFORM>/` on the SD card —
+no zip/extract/rename round trip needed. The script only copies the runtime
+payload (`bin/`, `res/`, `state/`, `stations/`, `pak.json`, `launch.sh`), so
+source, docs, and build scripts never leak into the shipped pak. Run
+`python3 create_dist.py --help` for platform selection and other flags.
+
 ### Project Structure
 
 ```
