@@ -10,18 +10,17 @@
 #include "selfupdate.h"
 #include "module_common.h"
 #include "module_menu.h"
-#include "resume.h"
 #include "background.h"
 
-// Menu items variants (first entry is mutable for Resume/Now Playing swap)
-static const char* menu_items_with_first[] = {"Resume", "Library", "Online Radio", "Podcasts", "Settings"};
-static const char* menu_items_no_first[] = {"Library", "Online Radio", "Podcasts", "Settings"};
+// Menu items variants (the first entry only exists while audio is playing)
+static const char* menu_items_with_first[] = {"Now Playing", "Music", "Audiobook", "Online Radio", "Podcasts", "Settings"};
+static const char* menu_items_no_first[] = {"Music", "Audiobook", "Online Radio", "Podcasts", "Settings"};
 
 // Cached first_item_mode for callbacks
 static int current_first_item_mode = MENU_FIRST_NONE;
 
-// Scroll state for Resume track name
-static ScrollTextState resume_scroll = {0};
+// Scroll state for the Now Playing label
+static ScrollTextState now_playing_scroll = {0};
 
 // Get label for Now Playing based on background player type
 static const char* get_now_playing_label(void) {
@@ -29,6 +28,7 @@ static const char* get_now_playing_label(void) {
         case BG_MUSIC:  return "Music";
         case BG_RADIO:  return "Radio";
         case BG_PODCAST: return "Podcast";
+        case BG_AUDIOBOOK: return "Audiobook";
         default: return "Audio";
     }
 }
@@ -40,20 +40,14 @@ static const char* main_menu_get_label(int index, const char* default_label,
 
     // First item: return full label for pill sizing
     if (has_first && index == 0) {
-        if (current_first_item_mode == MENU_FIRST_NOW_PLAYING) {
-            snprintf(buffer, buffer_size, "Now Playing: %s", get_now_playing_label());
-            return buffer;
-        }
-        // Resume mode
-        const char* label = Resume_getLabel();
-        if (label) {
-            snprintf(buffer, buffer_size, "%s", label);
-            return buffer;
-        }
+        snprintf(buffer, buffer_size, "Now Playing: %s", get_now_playing_label());
+        return buffer;
     }
 
     // Settings item: show update badge
-    int settings_index = has_first ? 4 : 3;
+    // Rendered index of Settings: with the first slot present it matches
+    // MENU_SETTINGS directly; without it every entry shifts up by one.
+    int settings_index = has_first ? MENU_SETTINGS : MENU_SETTINGS - 1;
     if (index == settings_index) {
         const SelfUpdateStatus* status = SelfUpdate_getStatus();
         if (status->update_available) {
@@ -72,18 +66,9 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
     // Only custom-render when selected (for scrolling); default rendering handles non-selected
     if (!selected) return false;
 
-    const char* track_name;
-    const char* prefix;
+    const char* prefix = "Now Playing: ";
+    const char* track_name = get_now_playing_label();
 
-    if (current_first_item_mode == MENU_FIRST_NOW_PLAYING) {
-        prefix = "Now Playing: ";
-        track_name = get_now_playing_label();
-    } else {
-        const ResumeState* rs = Resume_getState();
-        if (!rs) return false;
-        track_name = rs->track_name[0] ? rs->track_name : "Unknown";
-        prefix = "Resume: ";
-    }
     SDL_Color text_color = Fonts_getListTextColor(true);
     TTF_Font* font = Fonts_getLarge();
 
@@ -108,7 +93,7 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
         SDL_SetClipRect(screen, &clip);
 
         // Use software scroll (use_gpu=false) to respect SDL clip rect
-        ScrollText_update(&resume_scroll, track_name, font, remaining_width,
+        ScrollText_update(&now_playing_scroll, track_name, font, remaining_width,
                           text_color, screen, track_x, text_y, false);
 
         // Restore clip rect
@@ -127,15 +112,8 @@ void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
     current_first_item_mode = first_item_mode;
     bool has_first = (first_item_mode != MENU_FIRST_NONE);
 
-    // Update the first item label based on mode
-    if (first_item_mode == MENU_FIRST_NOW_PLAYING) {
-        menu_items_with_first[0] = "Now Playing";
-    } else {
-        menu_items_with_first[0] = "Resume";
-    }
-
     const char** items = has_first ? menu_items_with_first : menu_items_no_first;
-    int count = has_first ? 5 : 4;
+    int count = has_first ? MENU_ITEM_COUNT : MENU_ITEM_COUNT - 1;
 
     SimpleMenuConfig config = {
         .title = "Music Player",
@@ -163,7 +141,7 @@ typedef struct {
 static const ControlHelp main_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"X", "Clear History/Playback"},
+    {"X", "Stop Playback"},
     {"B (double)", "Exit App"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
@@ -356,9 +334,42 @@ static const ControlHelp settings_controls[] = {
     {NULL, NULL}
 };
 
+// Audiobook library list controls (A/B shown in footer)
+static const ControlHelp audiobook_library_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Mark Finished/Unfinished"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Audiobook chapter list controls (A/B shown in footer)
+static const ControlHelp audiobook_chapters_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Audiobook player controls (A/B shown in footer)
+static const ControlHelp audiobook_playing_controls[] = {
+    {"A", "Play/Pause"},
+    {"Left", "Back 10s"},
+    {"Right", "Forward 30s"},
+    {"Up/L1", "Prev Chapter"},
+    {"Down/R1", "Next Chapter"},
+    {"X", "Chapter List"},
+    {"Y", "Sleep Timer"},
+    {"Select", "Screen Off"},
+    {"Select + A", "Wake Screen"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 static const ControlHelp library_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
+    {"X", "Forget Continue"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -479,7 +490,19 @@ void render_controls_help(SDL_Surface* screen, int app_state) {
             break;
         case 55: // LIBRARY_MENU_HELP_STATE
             controls = library_menu_controls;
-            page_title = "Library";
+            page_title = "Music";
+            break;
+        case 60: // AUDIOBOOK_LIBRARY_HELP_STATE
+            controls = audiobook_library_controls;
+            page_title = "Audiobook";
+            break;
+        case 61: // AUDIOBOOK_CHAPTERS_HELP_STATE
+            controls = audiobook_chapters_controls;
+            page_title = "Chapters";
+            break;
+        case 62: // AUDIOBOOK_PLAYING_HELP_STATE
+            controls = audiobook_playing_controls;
+            page_title = "Audiobook Player";
             break;
         case 41: // SETTINGS_INTERNAL_ABOUT
             controls = about_controls;
@@ -578,10 +601,10 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
     }
 }
 
-// Check if Resume scroll needs continuous redraw (software scroll mode)
+// Check if the Now Playing scroll needs continuous redraw (software scroll mode)
 bool menu_needs_scroll_redraw(void) {
     // Needs redraw if scrolling is active OR about to start (delay -> active transition)
-    return ScrollText_isScrolling(&resume_scroll) || ScrollText_needsRender(&resume_scroll);
+    return ScrollText_isScrolling(&now_playing_scroll) || ScrollText_needsRender(&now_playing_scroll);
 }
 
 // Render screen off hint message (shown before screen turns off)

@@ -26,12 +26,14 @@
 #include "module_player.h"
 #include "module_radio.h"
 #include "module_podcast.h"
+#include "module_audiobook.h"
 #include "downloader.h"
 #include "module_system.h"
 #include "module_settings.h"
 #include "settings.h"
 #include "resume.h"
 #include "background.h"
+#include "audiobook.h"
 #include "display_helper.h"
 
 // Global quit flag
@@ -144,33 +146,31 @@ int main(int argc, char* argv[]) {
         ModuleExitReason reason = MODULE_EXIT_TO_MENU;
 
         switch (selection) {
-            case MENU_RESUME: {  // Also MENU_NOW_PLAYING (same slot)
-                if (Background_isPlaying()) {
-                    // "Now Playing" — route to the active background module
-                    switch (Background_getActive()) {
-                        case BG_MUSIC:
-                            reason = PlayerModule_run(screen, true);  // Now Playing entry
-                            break;
-                        case BG_RADIO:
-                            reason = RadioModule_run(screen);
-                            break;
-                        case BG_PODCAST:
-                            reason = PodcastModule_run(screen);
-                            break;
-                        default:
-                            break;
-                    }
-                } else {
-                    // "Resume" — load saved state
-                    const ResumeState* rs = Resume_getState();
-                    if (rs) {
-                        reason = PlayerModule_runResume(screen, rs);
-                    }
+            case MENU_NOW_PLAYING: {
+                // The slot only exists while audio plays — route to its module
+                switch (Background_getActive()) {
+                    case BG_MUSIC:
+                        reason = PlayerModule_run(screen, true);  // Now Playing entry
+                        break;
+                    case BG_RADIO:
+                        reason = RadioModule_run(screen);
+                        break;
+                    case BG_PODCAST:
+                        reason = PodcastModule_run(screen);
+                        break;
+                    case BG_AUDIOBOOK:
+                        reason = AudiobookModule_run(screen);
+                        break;
+                    default:
+                        break;
                 }
                 break;
             }
             case MENU_LIBRARY:
                 reason = LibraryModule_run(screen);
+                break;
+            case MENU_AUDIOBOOK:
+                reason = AudiobookModule_run(screen);
                 break;
             case MENU_RADIO:
                 reason = RadioModule_run(screen);
@@ -196,6 +196,7 @@ int main(int argc, char* argv[]) {
 
 cleanup:
     Background_stopAll();
+    Audiobook_cleanup();
     Downloader_cleanup();
     Settings_quit();
     ModuleCommon_quit();

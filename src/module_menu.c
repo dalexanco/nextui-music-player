@@ -7,7 +7,6 @@
 #include "module_menu.h"
 #include "ui_main.h"
 #include "ui_utils.h"
-#include "resume.h"
 #include "background.h"
 
 // Toast message state
@@ -44,15 +43,13 @@ int MenuModule_run(SDL_Surface* screen) {
             ModuleCommon_setAutosleepDisabled(true);
         }
 
-        // Determine first item: Now Playing (if BG active) > Resume > none
-        int first_item_mode = MENU_FIRST_NONE;
-        if (Background_isPlaying()) {
-            first_item_mode = MENU_FIRST_NOW_PLAYING;
-        } else if (Resume_isAvailable()) {
-            first_item_mode = MENU_FIRST_RESUME;
-        }
+        // Determine first item: Now Playing (if BG active) > none.
+        // Resuming a stopped track is a per-domain concern, handled by the
+        // Continue row inside the Music and Audiobook menus.
+        int first_item_mode = Background_isPlaying()
+                            ? MENU_FIRST_NOW_PLAYING : MENU_FIRST_NONE;
         bool has_first = (first_item_mode != MENU_FIRST_NONE);
-        int item_count = has_first ? 5 : 4;
+        int item_count = has_first ? MENU_ITEM_COUNT : MENU_ITEM_COUNT - 1;
 
         // Handle global input first (volume, START dialogs, power)
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 0);
@@ -97,20 +94,12 @@ int MenuModule_run(SDL_Surface* screen) {
             return selection;
         }
         else if (PAD_justPressed(BTN_X)) {
-            if (menu_selected == 0) {
-                if (first_item_mode == MENU_FIRST_NOW_PLAYING) {
-                    // Stop background playback
-                    Background_stopAll();
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
-                    menu_selected = 0;
-                    dirty = 1;
-                } else if (first_item_mode == MENU_FIRST_RESUME) {
-                    // Clear resume history
-                    Resume_clear();
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
-                    menu_selected = 0;
-                    dirty = 1;
-                }
+            if (menu_selected == 0 && first_item_mode == MENU_FIRST_NOW_PLAYING) {
+                // Stop background playback
+                Background_stopAll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
+                menu_selected = 0;
+                dirty = 1;
             }
         }
         else if (PAD_justPressed(BTN_B)) {
