@@ -129,7 +129,19 @@ A comprehensive music playback application for NextUI featuring local file playb
 
 ### Prerequisites
 - Cross-compilation toolchain for ARM64
-- NextUI workspace with platform dependencies
+- A NextUI workspace checkout with platform dependencies (`all/`, `tg5040/`,
+  `tg5050/`) somewhere on disk
+- A `.nextui-workspace` symlink at this repo's root pointing at that
+  checkout's `workspace/` directory, e.g.:
+  ```bash
+  ln -s /path/to/NextUI/workspace .nextui-workspace
+  ```
+  `run-docker.sh` (used by `build-tg5040.sh`, `build-tg5050.sh`, `dev.sh`, and
+  `deploy.sh`) mounts that workspace and bind-mounts this repo over its
+  `nextui-music-player/` slot, so builds always use whatever checkout or
+  worktree you're actually running from — no need to physically nest this
+  repo inside the NextUI tree. It fails fast with a clear error if the
+  symlink is missing or broken.
 
 ### Build Commands
 
