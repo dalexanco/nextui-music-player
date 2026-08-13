@@ -160,6 +160,27 @@ payload (`bin/`, `res/`, `state/`, `stations/`, `pak.json`, `launch.sh`), so
 source, docs, and build scripts never leak into the shipped pak. Run
 `python3 create_dist.py --help` for platform selection and other flags.
 
+### Iterating on a Connected Device
+
+Two scripts wrap the build + adb push cycle, for different points in a change:
+
+```bash
+sh dev.sh [tg5040|tg5050]      # code-only iteration: build, push the binary,
+                                # kill + relaunch on-device, tail its log
+sh deploy.sh [tg5040|tg5050|all]  # full resync: build, package via
+                                   # create_dist.py, push the whole pak folder
+```
+
+`dev.sh` is the tight loop while hacking on `src/*.c` — it only refreshes
+`musicplayer.elf` on top of a pak that's already installed, so it's fast but
+assumes `res/`, `stations/`, `pak.json`, etc. are already current on the card.
+`deploy.sh` pushes the complete folder (same payload `create_dist.py`
+produces), so run it after touching anything besides source, or before
+handing a build to someone else to test. Both require `adb` connected to the
+device. The relaunch/log-tail steps in `dev.sh` assume standard NextUI SD
+card paths — adjust `PAK_DIR`/log discovery in the script if your setup
+differs.
+
 ### Project Structure
 
 ```
