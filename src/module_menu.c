@@ -54,6 +54,7 @@ int MenuModule_run(SDL_Surface* screen) {
         // Handle global input first (volume, START dialogs, power)
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 0);
         if (global.should_quit) {
+            LOG_info("Menu: quit requested by global input (quit dialog)\n");
             return MENU_QUIT;
         }
         if (global.input_consumed) {
@@ -135,6 +136,7 @@ int MenuModule_run(SDL_Surface* screen) {
             dirty = 0;
 
             if (exiting) {
+                LOG_info("Menu: quit requested by double-B\n");
                 // Give the "Exiting..." toast a moment on screen before NextUI
                 // takes over and starts rendering its own UI.
                 SDL_Delay(EXIT_TOAST_DELAY_MS);

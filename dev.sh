@@ -19,8 +19,19 @@ sh "build-$PLATFORM.sh"
 
 PAK_DIR="/mnt/SDCARD/Tools/$PLATFORM/Music Player.pak"
 
+# The push above only refreshes musicplayer.elf, so it happily "succeeds" against
+# a pak whose launch.sh is missing -- NextUI then has nothing to exec and drops
+# straight back to its menu, which looks exactly like an instant crash.
+if ! adb shell "[ -f '$PAK_DIR/launch.sh' ] && echo ok" | grep -q ok; then
+    echo "ERROR: no launch.sh in $PAK_DIR -- the pak is not fully installed." >&2
+    echo "Run 'sh deploy.sh $PLATFORM' to install the complete pak first." >&2
+    exit 1
+fi
+
 echo "Relaunching on device..."
-adb shell "pkill -f musicplayer.elf" 2>/dev/null || true
+# busybox has no pkill; kill by pid instead (a missed kill leaves the old
+# instance holding the audio device, so the new one starts and exits at once).
+adb shell "for p in \$(pidof musicplayer.elf); do kill \$p; done" 2>/dev/null || true
 # Re-exec launch.sh directly (bypassing the NextUI menu) so the fresh binary
 # is picked up immediately -- same entry point NextUI uses when you open the
 # pak from the menu.

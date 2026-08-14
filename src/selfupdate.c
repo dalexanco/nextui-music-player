@@ -72,6 +72,22 @@ static int sync_directories(const char* src, const char* dst) {
     DIR* dir;
     struct dirent* entry;
 
+    // Refuse to sync from a source that isn't there or is empty: every entry in
+    // dst would count as an orphan and the installed pak would be deleted.
+    {
+        DIR* src_dir = opendir(src);
+        if (!src_dir) return -1;
+        int src_entries = 0;
+        struct dirent* se;
+        while ((se = readdir(src_dir)) != NULL) {
+            if (strcmp(se->d_name, ".") == 0 || strcmp(se->d_name, "..") == 0) continue;
+            src_entries++;
+            break;
+        }
+        closedir(src_dir);
+        if (src_entries == 0) return -1;
+    }
+
     // First, copy all files from src to dst (overwriting existing)
     snprintf(cmd, sizeof(cmd), "cp -rf \"%s\"/* \"%s\"/ 2>/dev/null", src, dst);
     system(cmd);
@@ -140,24 +156,41 @@ static int extract_zip(const char* zip_path, const char* dest_dir) {
             *last_slash = '/';
         }
 
-        // Extract file
+        // Extract file. Any failure here has to abort the whole update: the
+        // caller syncs the extracted tree over the live pak and deletes
+        // whatever is missing from it, so a half-extracted zip (out of space
+        // on /tmp, unreadable entry) would wipe the installed pak instead.
         zip_file_t* zf = zip_fopen_index(za, i, 0);
-        if (!zf) continue;
+        if (!zf) {
+            zip_close(za);
+            return -1;
+        }
 
         FILE* out = fopen(full_path, "wb");
         if (!out) {
             zip_fclose(zf);
-            continue;
+            zip_close(za);
+            return -1;
         }
 
         char buf[8192];
         zip_int64_t bytes_read;
+        bool write_failed = false;
         while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
-            fwrite(buf, 1, bytes_read, out);
+            if (fwrite(buf, 1, (size_t)bytes_read, out) != (size_t)bytes_read) {
+                write_failed = true;
+                break;
+            }
         }
-
-        fclose(out);
+        // bytes_read < 0 means the entry itself could not be decompressed
+        if (bytes_read < 0) write_failed = true;
+        if (fclose(out) != 0) write_failed = true;
         zip_fclose(zf);
+
+        if (write_failed) {
+            zip_close(za);
+            return -1;
+        }
 
         // Preserve executable permission for .elf and .sh files
         if (strstr(name, ".elf") || strstr(name, ".sh")) {

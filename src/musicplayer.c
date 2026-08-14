@@ -132,12 +132,15 @@ int main(int argc, char* argv[]) {
     // Initialize YouTube downloader (loads queue, auto-resumes pending downloads)
     Downloader_init();
 
+    LOG_info("Startup complete, entering main loop\n");
+
     // Main application loop
     while (!quit) {
         // Run main menu - returns selected item or MENU_QUIT
         int selection = MenuModule_run(screen);
 
         if (selection == MENU_QUIT) {
+            LOG_info("Main loop: quitting (menu returned MENU_QUIT)\n");
             quit = true;
             continue;
         }
