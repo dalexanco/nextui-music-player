@@ -4,9 +4,11 @@
 #include <string>
 
 #include "podcast.h"
+#include "podcast_import.h"
 #include "toast.h"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/podcast_catalog_page.hpp"
+#include "ui/podcast_import_page.hpp"
 #include "ui/text_input_page.hpp"
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
@@ -29,13 +31,14 @@ class ManageAdapter final : public ListAdapter {
 public:
     static constexpr int kSearch = 0;
     static constexpr int kTopShows = 1;
+    static constexpr int kImport = 2;
 
-    int getCount() const override { return 2; }
+    int getCount() const override { return 3; }
     long getItemId(int index) const override { return index; }
 
     std::shared_ptr<ListItemView> getView(int index) override {
         auto row = std::make_shared<ListRowView>(Fonts_getMedium());
-        row->setText(index == kSearch ? "Search" : "Top Shows");
+        row->setText(index == kSearch ? "Search" : index == kTopShows ? "Top Shows" : "Import from SD card");
         return row;
     }
 };
@@ -79,7 +82,7 @@ public:
 
 private:
     void choose(int index) {
-        // Both need the network
+        // All of them need the network: the import subscribes to feeds
         getNavigator().openForResult(WifiDialogPage{}, [this, index](const bool& connected) {
             if (!connected) {
                 Toast_show("Internet connection required", TOAST_DURATION);
@@ -87,6 +90,9 @@ private:
             }
             if (index == ManageAdapter::kSearch) {
                 search();
+            } else if (index == ManageAdapter::kImport) {
+                PodcastImport_prepareFolder();
+                getNavigator().open(PodcastImportPage{});
             } else {
                 Podcast_loadCharts(nullptr);
                 getNavigator().open(PodcastCatalogPage{PodcastCatalogKind::TopShows});

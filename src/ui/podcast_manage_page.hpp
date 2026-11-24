@@ -8,7 +8,8 @@
 
 /**
  * Manage Podcasts (Y of the shows): Search asks for a text on the keyboard and lists the answer,
- * Top Shows lists the charts. Both need the network.
+ * Top Shows lists the charts, and Import from SD card subscribes to the feeds of the files in
+ * Podcasts/Subscriptions. All need the network.
  */
 class PodcastManagePage final : public UiPage {
 public:

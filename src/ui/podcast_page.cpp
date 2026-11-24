@@ -10,6 +10,7 @@
 #include "module_common.h"
 #include "module_podcast.h"
 #include "podcast.h"
+#include "podcast_import.h"
 #include "toast.h"
 #include "ui/choice_options_page.hpp"
 #include "ui/confirm_dialog_page.hpp"
@@ -156,6 +157,7 @@ public:
     void onEnter() override {
         Podcast_init();
         PodcastModule_autoRefresh();
+        if (PodcastImport_isRunning()) Toast_show("Importing podcasts...", TOAST_DURATION);
         screenView.setAdapter(rows);
         list.start();
         shownSignature = getSignature();
@@ -166,7 +168,8 @@ public:
     }
 
     void onExit() override {
-        if (Podcast_isActive() || Podcast_isDownloading()) {
+        // An import that runs keeps the module alive, as a download does: it still adds shows
+        if (Podcast_isActive() || Podcast_isDownloading() || PodcastImport_isRunning()) {
             Podcast_saveSubscriptions();
             Podcast_flushProgress();
             if (Podcast_isActive()) Background_setActive(BG_PODCAST);
@@ -179,6 +182,7 @@ public:
 
     void onTick() override {
         Podcast_update();
+        if (PodcastImport_takeFinished()) sayImportResult();
         if (Podcast_checkRefreshCompleted()) {
             Podcast_saveSubscriptions();
             reload();
@@ -224,6 +228,17 @@ private:
                std::to_string(queue > 0) + "/" + std::to_string(newEpisodes);
     }
 
+
+    /** Says what the import of the files on the card did, then lists the shows again. */
+    void sayImportResult() {
+        const PodcastImportStatus status = PodcastImport_getStatus();
+        std::string text = std::to_string(status.added) + (status.added == 1 ? " podcast added" : " podcasts added");
+        if (status.duplicates > 0) text += ", " + std::to_string(status.duplicates) + " already subscribed";
+        if (status.failed + status.invalid_files > 0) text += ", " + std::to_string(status.failed + status.invalid_files) + " failed, see Import from SD card";
+        Toast_show(text.c_str(), TOAST_DURATION);
+        Podcast_saveSubscriptions();
+        reload();
+    }
 
     /** Plays the episode of an entry of Continue Listening, which is found again by its guid. */
     void continueListening(int index) {

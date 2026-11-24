@@ -77,6 +77,7 @@ more lines to the log. Install it only to help find the cause of a problem.
 
 ### Podcast
 - Search Apple Podcast for podcast source
+- Import podcasts from a file dropped on the SD card (feed list, OPML or shortcut)
 - Subscription management
 - Download episodes for local offline playback
 - Podcast files will be placed in `./Podcasts`
@@ -140,6 +141,27 @@ more lines to the log. Install it only to help find the cause of a problem.
 - Download any episode you wish to listen.
 - Once downloaded, it will be available to play.
 - Press `Y` button to manage subscriptions.
+
+#### Add a podcast from a file
+Some shows (Radio France, for one) are missing from the Apple directory, and typing a feed address
+with a gamepad is a chore. Instead, drop a file in `Podcasts/Subscriptions/` on the SD card
+(the folder appears the first time you open `Podcasts`):
+
+- `.txt`: one feed address per line, then an optional title. `#` starts a comment.
+- `.opml`: the export of your podcast app, many shows at once.
+- `.url`: an internet shortcut to one feed.
+
+Example, `bestioles.txt`:
+
+```
+# France Inter
+https://radiofrance-podcast.net/podcast09/podcast_a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974.xml Bestioles
+```
+
+Open `Podcasts` with Wi-Fi on and the shows are added, with a message that says how many. `Y` >
+`Search and top shows` > `Import from SD card` lists what became of each feed. A file that was read moves to
+`imported/`; the feeds that failed are written, with the reason, to `<name>.failed.txt`. See
+[docs/podcast-import.md](docs/podcast-import.md) for how to find a feed address.
 
 ## Building from Source
 
