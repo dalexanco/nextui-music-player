@@ -64,7 +64,7 @@ public:
 class LibraryPageImpl final : public UiPageImpl<LibraryPage>, private ListScreenListener {
 public:
     LibraryPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screenView.getTitleView().setText("Library");
+        screenView.getTitleView().setText("Music");
         screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
         screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
     }

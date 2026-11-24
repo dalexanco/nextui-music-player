@@ -40,5 +40,5 @@ public:
 }  // namespace
 
 SubListPage makeMusicQueuePage() {
-    return SubListPage("Queue", "UP NEXT", "PLAY", THEME_SOURCE_MUSIC, std::make_shared<MusicQueueSource>(), HELP_QUEUE);
+    return SubListPage("Music", "QUEUE", "PLAY", THEME_SOURCE_MUSIC, std::make_shared<MusicQueueSource>(), HELP_QUEUE);
 }

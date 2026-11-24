@@ -87,7 +87,7 @@ private:
 class RadioPageImpl final : public UiPageImpl<RadioPage>, private ListScreenListener {
 public:
     RadioPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screenView.getTitleView().setText("Online Radio");
+        screenView.getTitleView().setText("Radio");
         screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
         emptyState.setMessage("No stations saved");
         emptyState.setLine("Press Y to manage stations");
@@ -106,7 +106,7 @@ public:
 
     void onEnter() override {
         if (Radio_init() != 0) {
-            Toast_show("Online Radio is not available", TOAST_DURATION);
+            Toast_show("Radio is not available", TOAST_DURATION);
             close();
             return;
         }

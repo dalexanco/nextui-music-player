@@ -92,8 +92,8 @@ std::string getRowLabel(MenuItem item) {
         case MenuItem::Resume:
             if (const char* label = Resume_getLabel()) return label;
             return "Resume";
-        case MenuItem::Library: return "Library";
-        case MenuItem::Radio:   return "Online Radio";
+        case MenuItem::Library: return "Music";
+        case MenuItem::Radio:   return "Radio";
         case MenuItem::Podcast: return "Podcasts";
         case MenuItem::Settings:
             return SelfUpdate_getStatus().update_available ? "Settings (Update available)" : "Settings";
