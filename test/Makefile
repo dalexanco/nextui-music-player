@@ -103,6 +103,7 @@ TESTS   += $(BIN)/test_ui_compositor
 TESTS   += $(BIN)/test_source_gradient
 TESTS   += $(BIN)/test_detail_panel_layout
 TESTS   += $(BIN)/test_browser_nav
+TESTS   += $(BIN)/test_music_player_layout
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -121,10 +122,6 @@ TESTS   += $(BIN)/test_ui_utils
 # copy of its own, because `desktop-objs` rebuilds that object from the source of
 # the tree.
 TESTS   += $(BIN)/test_ui_fonts
-
-# ui_music_playing.c draws with SDL_ttf, thus its test links the objects of the
-# desktop build as the two above do.
-TESTS   += $(BIN)/test_ui_music_playing
 
 # The views draw with SDL_ttf and the assets of the platform, thus their test links the
 # objects of the desktop build as the three above do. It gives a test double of ui_layers.c.
@@ -258,6 +255,9 @@ $(BIN)/test_detail_panel_layout: test_detail_panel_layout.cpp $(SRC)/ui/view/det
 
 $(BIN)/test_browser_nav: test_browser_nav.cpp $(SRC)/browser_nav.cpp $(SRC)/browser_nav.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_browser_nav.cpp $(SRC)/browser_nav.cpp
+
+$(BIN)/test_music_player_layout: test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp $(SRC)/ui/music_player_layout.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp
 
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c
@@ -489,13 +489,6 @@ $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h
 
 $(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_fonts.c
-	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
-	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
-	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
-
-$(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h test.h | $(BIN) desktop-objs
-	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_music_playing.c
 	$(CXX) -o $@ $@.o \
 	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \

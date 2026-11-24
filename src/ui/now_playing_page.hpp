@@ -5,7 +5,10 @@
 
 #include "ui/page/ui_page.hpp"
 
-/** Runs the legacy module of the Now Playing row of Main. Closes when the module returns. */
+/**
+ * The Now Playing row of Main: the native player while the music plays, and the legacy module of
+ * the podcast otherwise. Closes when the screen closes.
+ */
 class NowPlayingPage final : public UiPage {
 public:
     /** true when the screen closed because the queue of the music ended */

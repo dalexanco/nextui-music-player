@@ -137,6 +137,15 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 progress row. Spectrum removed here. Lyrics stay a full-page mode until 1.8.
 - Files: new `ui/music_playing_page.*`, `now_playing_page.cpp`. Board: `tpl-lecteur`.
 - Validation: audit screens 07–12, 20, 21; screen-off behaviour unchanged.
+- **Status: done, with deviations (built, NOT validated on device — screen-off, key lock, seek scan and art fade need a check on the Brick)** —
+  `MusicPlayerPage` (`ui/music_player_page.cpp`, opened by `NowPlayingPage` while the music plays; `ResumePage` now starts the session and opens it).
+  `module_music_playing.*`, `ui_music_playing.*` and their test are deleted. Layout maths and time texts are in `ui/music_player_layout.*` (`test_music_player_layout`, 13 tests).
+  Deviations, on purpose: (1) the new layout is the only layout of the player (a native rewrite cannot keep the legacy one); *Source colours* off only drops the gradient and the accent pills;
+  (2) the spectrum is removed (its code, `spectrum.c`, stays until 5.1; the `L2/L3` spectrum keys are gone); (3) `Y` toggles shuffle in this step and becomes the options panel in 1.7,
+  repeat is not reachable between 1.6 and 1.7; (4) the legacy title marquee on the animation layer is replaced by `TextView` scrolling; (5) the lyric window is inline, as before.
+  Behaviour kept: A pause, B back (saves the position or stops), L1/R1 and Up/Down previous/next, R2/R3 lyrics, hold Left/Right seek scan (`ModuleCommon_updateSeekScan`),
+  Select tap and the inactivity timeout go through the wake hint to a dark screen (`ModuleCommon_*ScreenOffHint`), any press wakes, SELECT + A closes the hint, USB media keys through the page stack.
+  `X` opens the queue sub-list (1.5).
 
 **1.7 Options panel (Y)** — `OptionsPanelView` (right panel, title + scope, rows with `‹ value ›`) and the music options
 (shuffle, repeat, lyrics, sleep timer, add to playlist). Replaces the START help for per-track settings. Board: `tpl-options`.

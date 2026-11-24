@@ -6,7 +6,7 @@
 
 #include "ui/page/ui_page.hpp"
 
-/** Runs the legacy module of the Resume row of Main. Closes when the module returns. */
+/** Plays the Resume record of Main and shows the player. Closes when the player closes. */
 class ResumePage final : public UiPage {
 public:
     using Result = std::monostate;
