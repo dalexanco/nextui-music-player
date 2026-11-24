@@ -67,6 +67,34 @@ TEST(black_against_white_gives_the_full_range) {
     CHECK(Theme_contrast(white, black) > 20.9);
 }
 
+TEST(each_source_has_its_accent_and_deep_tone) {
+    check_color(Theme_getAccent(THEME_SOURCE_MUSIC), 0xa3, 0x24, 0x5c);
+    check_color(Theme_getAccent(THEME_SOURCE_RADIO), 0x2a, 0x5f, 0xb8);
+    check_color(Theme_getAccent(THEME_SOURCE_PODCAST), 0x1d, 0x7d, 0x53);
+    check_color(Theme_getAccent(THEME_SOURCE_AUDIOBOOK), 0xa8, 0x68, 0x12);
+    check_color(Theme_getAccent(THEME_SOURCE_NEUTRAL), 0x5b, 0x5b, 0x66);
+    check_color(Theme_getDeep(THEME_SOURCE_MUSIC), 0x3b, 0x0c, 0x22);
+    check_color(Theme_getDeep(THEME_SOURCE_RADIO), 0x0f, 0x22, 0x49);
+    check_color(Theme_getDeep(THEME_SOURCE_PODCAST), 0x0b, 0x30, 0x21);
+    check_color(Theme_getDeep(THEME_SOURCE_AUDIOBOOK), 0x3a, 0x23, 0x06);
+    check_color(Theme_getDeep(THEME_SOURCE_NEUTRAL), 0x1c, 0x1c, 0x22);
+}
+
+TEST(unknown_source_gives_the_neutral_colors) {
+    check_color(Theme_getAccent((ThemeSource)99), 0x5b, 0x5b, 0x66);
+    check_color(Theme_getDeep((ThemeSource)99), 0x1c, 0x1c, 0x22);
+}
+
+TEST(each_accent_is_opaque_and_lighter_than_its_deep_tone) {
+    for (int source = 0; source < THEME_SOURCE_COUNT; source++) {
+        SDL_Color accent = Theme_getAccent((ThemeSource)source);
+        SDL_Color deep   = Theme_getDeep((ThemeSource)source);
+        CHECK_EQ_INT(accent.a, 255);
+        CHECK_EQ_INT(deep.a, 255);
+        CHECK(Theme_contrast(accent, deep) > 1.5);
+    }
+}
+
 int main(void) {
     RUN(default_palette_keeps_start_lightness);
     RUN(teal_powder_moves_away_from_page);
@@ -74,5 +102,8 @@ int main(void) {
     RUN(tan_keeps_green_hue);
     RUN(one_color_against_itself_gives_no_contrast);
     RUN(black_against_white_gives_the_full_range);
+    RUN(each_source_has_its_accent_and_deep_tone);
+    RUN(unknown_source_gives_the_neutral_colors);
+    RUN(each_accent_is_opaque_and_lighter_than_its_deep_tone);
     return test_summary();
 }

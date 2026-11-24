@@ -40,6 +40,28 @@ typedef enum {
     THEME_ROLE_COUNT,
 } ThemeRole;
 
+// The source of the content that a page shows. Each source has its own accent
+// and its own deep tone, which the "Source colours" setting puts on the status
+// pill, the hint pills and the page background.
+typedef enum {
+    THEME_SOURCE_MUSIC,
+    THEME_SOURCE_RADIO,
+    THEME_SOURCE_PODCAST,
+    THEME_SOURCE_AUDIOBOOK,
+    // Settings and each page that has no source of its own.
+    THEME_SOURCE_NEUTRAL,
+
+    THEME_SOURCE_COUNT,
+} ThemeSource;
+
+// The accent of a source. Pills and highlights use it. It does not depend on
+// the NextUI theme, thus it needs no Theme_init().
+SDL_Color Theme_getAccent(ThemeSource source);
+
+// The deep tone of a source: the dark base of its page background. An
+// unknown source gives the neutral one.
+SDL_Color Theme_getDeep(ThemeSource source);
+
 // Resolve each role from the active NextUI theme.
 // Must be called after GFX_init().
 void Theme_init(SDL_Surface* screen);

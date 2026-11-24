@@ -92,3 +92,35 @@ SDL_Color Theme_findLegibleHue(int hue, double min_contrast, SDL_Color backgroun
     }
     return best;
 }
+
+// The palette of the sources, from the design canvas. It does not follow the
+// NextUI theme, because the source is the meaning of a page.
+//noinspection HardcodedColor
+static const SDL_Color source_accents[THEME_SOURCE_COUNT] = {
+    {0xa3, 0x24, 0x5c, 0xff},
+    {0x2a, 0x5f, 0xb8, 0xff},
+    {0x1d, 0x7d, 0x53, 0xff},
+    {0xa8, 0x68, 0x12, 0xff},
+    {0x5b, 0x5b, 0x66, 0xff},
+};
+
+//noinspection HardcodedColor
+static const SDL_Color source_deeps[THEME_SOURCE_COUNT] = {
+    {0x3b, 0x0c, 0x22, 0xff},
+    {0x0f, 0x22, 0x49, 0xff},
+    {0x0b, 0x30, 0x21, 0xff},
+    {0x3a, 0x23, 0x06, 0xff},
+    {0x1c, 0x1c, 0x22, 0xff},
+};
+
+static ThemeSource known_source(ThemeSource source) {
+    return (unsigned)source < THEME_SOURCE_COUNT ? source : THEME_SOURCE_NEUTRAL;
+}
+
+SDL_Color Theme_getAccent(ThemeSource source) {
+    return source_accents[known_source(source)];
+}
+
+SDL_Color Theme_getDeep(ThemeSource source) {
+    return source_deeps[known_source(source)];
+}
