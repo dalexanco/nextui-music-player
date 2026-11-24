@@ -109,6 +109,7 @@ TESTS   += $(BIN)/test_radio_search
 TESTS   += $(BIN)/test_radio_player_state
 TESTS   += $(BIN)/test_podcast_format
 TESTS   += $(BIN)/test_podcast_rss
+TESTS   += $(BIN)/test_podcast_import_parse
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -288,6 +289,12 @@ $(BIN)/test_podcast_rss: test_podcast_rss.c $(SRC)/podcast_rss.c $(SRC)/podcast.
                          fixtures/radiofrance_odyssees.xml test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -I$(SRC)/include/yxml -DTEST_FIXTURE_DIR='"$(abspath fixtures)"' \
 	  -o $@ test_podcast_rss.c $(SRC)/podcast_rss.c $(SRC)/include/yxml/yxml.c
+
+$(BIN)/test_podcast_import_parse: test_podcast_import_parse.c $(SRC)/podcast_import_parse.c \
+                                  $(SRC)/podcast_import_parse.h $(SRC)/podcast.h \
+                                  $(SRC)/include/yxml/yxml.c fixtures/podcast_import_nested.opml test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -I$(SRC)/include/yxml -DTEST_FIXTURE_DIR='"$(abspath fixtures)"' \
+	  -o $@ test_podcast_import_parse.c $(SRC)/podcast_import_parse.c $(SRC)/include/yxml/yxml.c
 
 $(BIN)/test_sleep_timer: test_sleep_timer.c $(SRC)/sleep_timer.c $(SRC)/sleep_timer.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_sleep_timer.c $(SRC)/sleep_timer.c
