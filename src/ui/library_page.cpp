@@ -5,6 +5,8 @@
 #include <string>
 
 #include "downloader.h"
+#include "playlist_m3u.h"
+#include "resume.h"
 #include "ui/downloader_page.hpp"
 #include "ui/file_browser_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
@@ -32,7 +34,7 @@ enum class LibraryItem : int8_t {
 struct LibraryRow {
     LibraryItem item;
     const char* label;
-    /** The line of the detail panel, which shows with the setting "Source colours" */
+    /** The line of the detail panel when the row has nothing better, which shows with "Source colours" */
     const char* description;
 };
 
@@ -75,6 +77,7 @@ public:
     ThemeSource getSource() const override { return THEME_SOURCE_MUSIC; }
 
     void onEnter() override {
+        M3U_init();
         screenView.setAdapter(rows);
         list.start();
     }
@@ -99,13 +102,32 @@ public:
     }
 
 private:
-    /** Fills the detail panel for the row at `index`: its art tile, its line, and its place in Library */
+    /** Fills the detail panel for the row at `index`: its art tile, what it holds, and its place in Library */
     void onSelectionChanged(int index) override {
         if (index < 0 || index >= kRowCount) return;
         panel.getArt().setFallback(kRows[index].label, THEME_SOURCE_MUSIC);
-        panel.getInfo().setLine(kRows[index].description);
+        panel.getInfo().setLine(getRowLine(kRows[index]));
         panel.getInfo().setProgress((index + 1) * 100 / kRowCount);
         panel.getInfo().setPosition("Item " + std::to_string(index + 1) + " of " + std::to_string(kRowCount));
+    }
+
+    /** Returns what the row holds right now: the count of playlists, the last track played. */
+    static std::string getRowLine(const LibraryRow& row) {
+        switch (row.item) {
+            case LibraryItem::Playlists: {
+                PlaylistInfo found[MAX_PLAYLISTS];
+                const int count = M3U_listPlaylists(found, MAX_PLAYLISTS);
+                if (count <= 0) return "No playlist yet";
+                return std::to_string(count) + (count == 1 ? " playlist" : " playlists");
+            }
+            case LibraryItem::Files: {
+                const ResumeState* state = Resume_isAvailable() ? Resume_getState() : nullptr;
+                if (state && state->track_name[0]) return std::string("Last: ") + state->track_name;
+                return row.description;
+            }
+            case LibraryItem::Downloader: break;
+        }
+        return row.description;
     }
 
     void openItem(int index) {

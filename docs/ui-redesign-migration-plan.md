@@ -116,6 +116,7 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 
 **1.2 Library** — native already. List with the detail panel (art, artist, position).
 - Files: `library_page.cpp`. Board: `tpl-liste-musique`.
+- **Status: done (not validated on device)** — the panel lines are real: count of playlists, last track played (Resume record), downloader description. Library rows are menu entries, not tracks, hence no artist / progress of a track.
 
 **1.3 Playlists** — wrap-free native page replacing `ui_playlist.c` (130 lines, the smallest legacy module).
 - Files: new `ui/playlists_page` rewrite, `module_playlist.c` kept as logic only. Board: `tpl-liste`.
