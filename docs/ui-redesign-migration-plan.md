@@ -61,11 +61,16 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 
 ### Phase 0 — Foundations (no screen is migrated yet)
 
+> **Phase 0 status: code done and built for tg5040 / tg5050; not yet validated on the Brick** (device unreachable when the phase ended).
+> `docs/redesign/phase0/` only holds host renders of the gradient and of the art tile, made with the real render functions.
+> To do on the device: both values of the setting on the main menu, Settings, Library (panel) and the radio list; frame time; legacy pages with the gradient behind.
+
 **0.1 Source accent in the theme** *(smallest change)*
 - Add a `Source` enum (Music, Radio, Podcast, Audiobook, Neutral) and `Theme_getAccent(Source)` with the accent / deep
   colours from the canvas. Add `ThemeRole` entries only if a role is needed (`THEME_ROLE_ACCENT`).
 - Files: `ui_theme.h/.c`, `ui_theme_utils.c`.
 - Validation: nothing visible; unit test on the colour table.
+- **Status: done** — `ThemeSource` enum (`THEME_SOURCE_*`), `Theme_getAccent()` / `Theme_getDeep()` in `ui_theme_utils.c`; test in `test_ui_theme.c`.
 
 **0.2 Soft gradient background**
 - A page declares its `Source`; `page_stack_loop.cpp` paints the two-halo gradient (pre-rendered once per source,
@@ -73,23 +78,27 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 - Files: `page_stack_loop.cpp`, `ui/page/ui_page.hpp` (`getSource()`), `settings_page.cpp`, settings storage.
 - Validation: main menu and settings screenshots, both settings values. Frame time not worse (check `frame_state`).
 - Risk: gradient blit cost on tg5040 — pre-render to a cached surface.
+- **Status: done** — `BackgroundView` (layer 1, cached image per palette), `UiPageImplBase::getSource()`, `PageStack::setBackgroundPalette()`, setting `SETTING_SOURCE_COLOURS` ("Source colours" row in Settings, default off). Tests: `test_source_gradient`, `test_page_stack`. Frame time not measured (no device available).
 
 **0.3 Accent on the status and hint pills**
 - `StatusGroupView` and `ButtonHintsView` take the accent of the page source instead of the theme colour.
 - Files: `view/status_group_view.cpp`, `view/button_hints_view.cpp`, `view/screen_view.cpp`.
 - Validation: any native page; sizes unchanged (the existing pills already match the canvas).
+- **Status: done** — done through the `AccentPills` RAII (`ui/view/accent_pills.hpp`), which swaps the platform pill colour around the draw; `StatusGroupView` and `ButtonHintsView` render again when the accent changes. Native pages only (legacy modules keep their pills).
 
 **0.4 Large white title**
 - `TitleTextView` uses the large title font in primary colour, with the left margin of the rows.
 - Files: `view/title_text_view.cpp`, `view/screen_view.cpp`, `ui_fonts.c` (font size constant).
 - Validation: all native pages (title width vs status pill; long titles scroll).
 - Risk: this touches every page; keep it behind the same setting.
+- **Status: done** — `Fonts_getHeading()` (20 pt, about 60 px on the Brick), `TitleTextView::setHeading()`, applied by `ScreenView::layout()` while the setting is on.
 
 **0.5 Extended-pill row**
 - `ListRowView`: when selected, the pill grows over the right-hand view, and the text keeps its horizontal scroll;
   muted `THEME_ROLE_SECONDARY` colour for the right value of unselected rows.
 - Files: `view/list_row_view.cpp/.hpp`, `view/list_view.cpp`.
 - Validation: settings page (values on the right), radio list.
+- **Status: done** — `ListRowView::setRightText()`: the pill takes the whole row and the band goes away; the right text is muted when not selected. Used by Settings and the radio list. No host test (the view tests link the desktop objects).
 
 **0.6 Detail panel view**
 - New `DetailPanelView` = `ArtTileView` (square, side = 1/3 of the width, `BitmapView` with generated gradient tile and
@@ -97,6 +106,7 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 - `ListScreenView::setSidePanel(UiView*)` reserves the right third and shrinks the list.
 - Files: new `view/detail_panel_view.*`, `view/art_tile_view.*`; edit `view/list_screen_view.*`; tests for the layout maths.
 - Validation: a throw-away page in the *About* debug entry, or the library page behind the setting.
+- **Status: done** — `DetailPanelView`, `ArtTileView`, `InfoBlockView`, `ScreenView::setSidePanel()` (also on `ListScreenView`), pure geometry in `detail_panel_layout.*` (`test_detail_panel_layout`). Wired in the Library page behind the setting with demo content (row title tile, description, position in the list).
 
 ### Phase 1 — Music
 

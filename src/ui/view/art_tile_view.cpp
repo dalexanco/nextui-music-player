@@ -14,7 +14,7 @@ extern "C" {
 namespace {
 
 /** How much of white the light end of the tile holds, and how much of the deep tone the dark end */
-constexpr int kLightMixPercent = 30;
+constexpr int kLightMixPercent = 20;
 constexpr int kDarkMixPercent  = 55;
 
 }  // namespace
