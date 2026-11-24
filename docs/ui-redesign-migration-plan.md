@@ -161,6 +161,7 @@ progress row. Spectrum removed here. Lyrics stay a full-page mode until 1.8.
 ### Phase 2 — Radio (closest to existing: the list is already a page)
 
 **2.1 Station list** — `radio_page.cpp` with the panel (logo tile, genre · bitrate, favourite state). Board: `tpl-liste` (radio).
+- **Status: done (built, not validated on device)** — the list takes a `DetailPanelView` while *Source colours* is on: generated tile with the name, slogan (or name), `genre · bitrate`, `Favourite` mark; rows carry no genre on the right in the new look (old look unchanged). Shared by the next steps: `ui/radio_station_panel.*` (`StationPanelText`, `makeStationPanelText`, `fillStationPanel`, `getStationBitrate`; the bitrate is known only for the station that plays) and the new favourites set `radio_favourites.*` (pure, tested by `test_radio_favourites`) with its store `radio_favourites_store.c` (`radio/favourites.txt`, by URL, so `stations.txt` keeps its format).
 **2.2 Station management** — native page replacing the legacy radio management [`tpl-radio-gestion`]: favourites,
 `X` favourite, `Y` options (rename, delete).
 **2.3 Search / add station** — native page with the search field, results, panel [`tpl-radio-recherche`]; uses the

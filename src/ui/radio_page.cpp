@@ -11,6 +11,9 @@
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/radio_manage_page.hpp"
 #include "ui/radio_playing_page.hpp"
+#include "ui/radio_station_panel.hpp"
+#include "radio_favourites.h"
+#include "ui/view/detail_panel_view.hpp"
 #include "ui/view/empty_state_view.hpp"
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
@@ -52,7 +55,8 @@ public:
         RadioStation* stations;
         Radio_getStations(&stations);
         const RadioStation& station = stations[index];
-        std::string key = std::string(station.url) + '\n' + station.name + '\n' + station.genre;
+        std::string key = std::string(station.url) + '\n' + station.name + '\n' + station.genre +
+                          (Theme_isSourceColoursEnabled() ? "\n1" : "\n0");
         const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
         return it->second;
     }
@@ -63,7 +67,8 @@ public:
         const RadioStation& station = stations[index];
         auto row = std::make_shared<ListRowView>(Fonts_getMedium());
         row->setText(station.name);
-        if (station.genre[0]) {
+        // The detail panel of the new look carries the genre
+        if (station.genre[0] && !Theme_isSourceColoursEnabled()) {
             auto genre = std::make_shared<TextView>(Fonts_getTiny(), false);
             genre->setText(station.genre);
             genre->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
@@ -118,8 +123,11 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
+        // The panel belongs to the source colours look, and the setting can change between frames
+        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
-        if (Radio_hasUserStations() || stations.getCount() == 0) return;
+        // The notes of the old look would run under the panel of the new one
+        if (Theme_isSourceColoursEnabled() || Radio_hasUserStations() || stations.getCount() == 0) return;
         // The note ends one pill row above the row of the button hints
         const int hintsTop    = context.getMaxSize().h - SCALE1(PADDING + PILL_SIZE);
         const int secondY     = hintsTop - SCALE1(PILL_SIZE);
@@ -150,6 +158,17 @@ public:
     }
 
 private:
+    void onSelectionChanged(int index) override { updatePanel(index); }
+
+    /** Fills the detail panel for the station at `index`: its tile, slogan, genre, bitrate and mark */
+    void updatePanel(int index) {
+        RadioStation* all;
+        const int count = Radio_getStations(&all);
+        if (index < 0 || index >= count) return;
+        const RadioStation& station = all[index];
+        fillStationPanel(panel, makeStationPanelText(station, RadioFavourites_isFavourite(station.url) ? "Favourite" : ""));
+    }
+
     /** Returns the station of the selected row, or nullptr with no station. */
     const RadioStation* getSelectedStation(int& index) {
         index = list.getSelectedIndex();
@@ -204,6 +223,7 @@ private:
         const int position = list.getSelectedIndex();
         list.notifyDataChanged();
         if (position >= 0) list.setSelectedIndex(position);
+        updatePanel(list.getSelectedIndex());
         updateHints();
     }
 
@@ -214,6 +234,7 @@ private:
     StationListAdapter stations;
     ListScreenView screenView{Fonts_getLarge()};
     EmptyStateView emptyState;
+    DetailPanelView panel;
     TextView noteFirst{Fonts_getTiny(), true};
     TextView noteSecond{Fonts_getTiny(), true};
     ListScreenController list{screenView, getScheduler(), *this};

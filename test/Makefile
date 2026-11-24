@@ -106,6 +106,7 @@ TESTS   += $(BIN)/test_browser_nav
 TESTS   += $(BIN)/test_options_panel_layout
 TESTS   += $(BIN)/test_sleep_timer
 TESTS   += $(BIN)/test_music_player_layout
+TESTS   += $(BIN)/test_radio_favourites
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -260,6 +261,9 @@ $(BIN)/test_browser_nav: test_browser_nav.cpp $(SRC)/browser_nav.cpp $(SRC)/brow
 
 $(BIN)/test_music_player_layout: test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp $(SRC)/ui/music_player_layout.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp
+
+$(BIN)/test_radio_favourites: test_radio_favourites.c $(SRC)/radio_favourites.c $(SRC)/radio_favourites.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_radio_favourites.c $(SRC)/radio_favourites.c
 
 $(BIN)/test_sleep_timer: test_sleep_timer.c $(SRC)/sleep_timer.c $(SRC)/sleep_timer.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_sleep_timer.c $(SRC)/sleep_timer.c

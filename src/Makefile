@@ -217,7 +217,7 @@ LOCAL_SRC = \
     version.c \
     musicplayer.cpp player.c filedb.c playlist.c playlist_m3u.c \
     db.c db_schema.c db_statement.c debug.c \
-    radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
+    radio.c radio_favourites.c radio_favourites_store.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
     downloader.c selfupdate.c selfupdate_install.c display_helper.c pad_reset.c \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
@@ -236,7 +236,7 @@ LOCAL_SRC = \
     input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
     input/common_button_handler.cpp input/common_button_handler_nextui.cpp input/input_manager.cpp \
     browser_nav.cpp ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/page/list_screen_controller.cpp ui/quit_dialog_page.cpp ui/confirm_dialog_page.cpp ui/wifi_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
-    ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/podcast_page.cpp \
+    ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/radio_station_panel.cpp ui/podcast_page.cpp \
     ui/settings_page.cpp ui/errors_page.cpp ui/about_page.cpp ui/app_update_page.cpp ui/ytdlp_install_page.cpp ui/file_browser_page.cpp \
     ui/playlists_page.cpp ui/music_player_page.cpp ui/music_options_page.cpp ui/music_player_layout.cpp ui/sub_list_page.cpp ui/music_queue_page.cpp ui/add_to_playlist_page.cpp ui/playlist_tracks_page.cpp ui/text_input_page.cpp ui/downloader_page.cpp \
     ui/main_menu_page.cpp \
