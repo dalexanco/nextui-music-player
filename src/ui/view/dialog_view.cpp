@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "ui/view/rounded_rect.hpp"
 #include "ui_theme.h"
 
 // The NextUI headers declare C functions and have no guard of their own
@@ -31,12 +32,26 @@ void DialogFrameView::clearEdgeColor() {
     dirty        = true;
 }
 
+void DialogFrameView::setBorderless(bool value) {
+    if (value == borderless) return;
+    borderless = value;
+    dirty      = true;
+}
+
 void DialogFrameView::draw(UiDrawContext& context) {
     dirty                = false;
     SDL_Surface* surface = context.getSurface();
     if (!surface) return;
     const int w      = surface->w;
     const int h      = surface->h;
+    if (Theme_isSourceColoursEnabled()) {
+        // The canvas rounds its surfaces at 28 px of 768: half of it at the scale of the device
+        const SDL_Color edge = hasEdgeColor ? edgeColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
+        renderRoundedRect(static_cast<uint32_t*>(surface->pixels), w, h, surface->pitch / 4,
+                          RoundedRectStyle{Theme_getColor(THEME_ROLE_SURFACE_BACKGROUND, false), edge,
+                                           borderless ? 0 : SCALE1(1), SCALE1(14)});
+        return;
+    }
     const int border = SCALE1(2);
     fill(surface, SDL_Rect{0, 0, w, h}, Theme_getColor(THEME_ROLE_SURFACE_BACKGROUND, false));
     const SDL_Color edge = hasEdgeColor ? edgeColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
@@ -67,7 +82,10 @@ void DialogView::layout(UiLayoutContext& context) {
     const int bodyHeight = content ? contentHeight + gap : 0;
     const int height      = top + titleHeight + gap + bodyHeight + hintHeight + gap;
 
-    const SDL_Rect surface = {(space.w - width) / 2, (space.h - height) / 2, width, height};
+    SDL_Rect surface = {(space.w - width) / 2, (space.h - height) / 2, width, height};
+    // A tall dialog keeps the row of the button hints visible: it goes up, never under the row
+    const int barTop = space.h - SCALE1(PADDING) - SCALE1(PILL_SIZE) - SCALE1(PADDING) / 2;
+    if (surface.y + height > barTop) surface.y = std::max(SCALE1(PADDING) / 2, barTop - height);
     context.layoutChild(frame, surface);
     layoutText(context, measuring, title, surface, surface.y + top);
     int y = surface.y + top + titleHeight + gap;

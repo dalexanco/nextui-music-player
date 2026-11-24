@@ -12,6 +12,9 @@ struct OptionsPanelRects {
     SDL_Rect rows;
 };
 
+/** Returns the left edge of the panel, which the text at its left must not pass. */
+int getOptionsPanelLeft(int screenWidth, int padding);
+
 /**
  * Puts the panel of the board `tpl-options` at the right of the screen: 600 of 1024 wide, from 120
  * of 768 down, as high as its header and `rowCount` rows of `rowHeight` need, but never lower than

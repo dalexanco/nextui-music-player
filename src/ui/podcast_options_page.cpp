@@ -10,6 +10,7 @@
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/art_fade_view.hpp"
 #include "ui/view/box_view.hpp"
+#include "ui/view/options_header_view.hpp"
 #include "ui/view/options_panel_view.hpp"
 #include "ui/view/screen_view.hpp"
 #include "ui_fonts.h"
@@ -31,17 +32,15 @@ constexpr const char* kRightHints[] = {"B", "CLOSE", "A", "CHOOSE", nullptr};
 class PodcastOptionsPageImpl final : public UiPageImpl<PodcastOptionsPage> {
 public:
     PodcastOptionsPageImpl(std::string show, std::string episode)
-        : UiPageImpl(PageKind::FullScreen), showView(Fonts_getMedium(), true), titleView(Fonts_getHeading(), false) {
+        : UiPageImpl(PageKind::FullScreen) {
         screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
-        showView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        titleView.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
         // The dim over the player that shows behind the panel
         SDL_Color dim = Theme_getColor(THEME_ROLE_PAGE_BACKGROUND, false);
         dim.a         = 158;
         dimView.setColor(dim);
         artView.setSource(THEME_SOURCE_PODCAST);
-        showView.setText(show.empty() ? "Podcast" : show);
-        titleView.setText(episode);
+        header.setMeta(show.empty() ? "Podcast" : show);
+        header.setTitle(episode);
         panel.setScope("EPISODE");
     }
 
@@ -61,14 +60,7 @@ public:
         context.layoutChild(artView, SDL_Rect{screen.w - screen.w * 620 / 1024, 0, screen.w * 620 / 1024, screen.h});
         context.layoutChild(dimView, context.getMaxRect());
         context.layoutChild(screenView, context.getMaxRect());
-        const int x               = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        const int y               = screen.h * 132 / 768;
-        const int width           = screen.w * 440 / 1024;
-        UiLayoutContext measuring = context.createMeasuringContext();
-        const int showHeight      = measuring.layoutChild(showView, SDL_Rect{0, 0, width, screen.h}).getSize().h;
-        context.layoutChild(showView, SDL_Rect{x, y, width, showHeight});
-        const int titleHeight = measuring.layoutChild(titleView, SDL_Rect{0, 0, width, screen.h}).getSize().h;
-        context.layoutChild(titleView, SDL_Rect{x, y + showHeight + SCALE1(6), width, titleHeight});
+        context.layoutChild(header, context.getMaxRect());
         context.layoutChild(panel, context.getMaxRect());
     }
 
@@ -131,8 +123,7 @@ private:
     ArtFadeView artView;
     BoxView dimView;
     ScreenView screenView{Fonts_getLarge()};
-    TextView showView;
-    TextView titleView;
+    OptionsHeaderView header;
     OptionsPanelView panel;
 };
 

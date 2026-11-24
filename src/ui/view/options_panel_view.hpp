@@ -9,6 +9,7 @@
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
 #include "ui/view/list_view.hpp"
+#include "ui/view/option_row_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/ui_layout.hpp"
 
@@ -23,6 +24,10 @@ struct OptionRow {
  * The options panel of a player, at the right of the screen: a title and the scope of the options
  * (TRACK, STATION), then the rows. The selected row shows its value between arrows, `‹ On ›`. The
  * page moves the selection and changes the values, and gives them back through setValue().
+ *
+ * With the setting "Source colours" on, the panel is the rounded dark surface of the board
+ * `tpl-options` (no edge, rows of 84 px, an accent band only behind a value); off, it keeps the
+ * square panel with a border and the list rows.
  *
  * Give it the whole screen: it places itself with layoutOptionsPanel().
  */
@@ -56,9 +61,15 @@ private:
         std::shared_ptr<ListItemView> getView(int index) override { return views[static_cast<size_t>(index)]; }
 
         std::vector<OptionRow> rows;
-        std::vector<std::shared_ptr<ListRowView>> views;
+        std::vector<std::shared_ptr<ListItemView>> views;
+        // The rows of the square look, which put the value in a text view that the panel owns
         std::vector<std::shared_ptr<TextView>> valueViews;
+        // The rows of the rounded look
+        std::vector<std::shared_ptr<OptionRowView>> optionViews;
     };
+
+    /** Makes the views of the rows for the look that the setting gives: rounded, or the old square one. */
+    void buildViews();
 
     /** Shows the value of each row, between arrows for the selected row. */
     void refreshValues();
@@ -68,6 +79,8 @@ private:
     TextView scopeView;
     ListView listView;
     Adapter adapter;
+    bool rounded      = false;
+    bool viewsStale   = true;
 };
 
 #endif

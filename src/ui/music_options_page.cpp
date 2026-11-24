@@ -12,6 +12,7 @@
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/art_fade_view.hpp"
 #include "ui/view/box_view.hpp"
+#include "ui/view/options_header_view.hpp"
 #include "ui/view/options_panel_view.hpp"
 #include "ui/view/screen_view.hpp"
 #include "ui_fonts.h"
@@ -43,10 +44,8 @@ std::string getSleepValue() {
 class MusicOptionsPageImpl final : public UiPageImpl<MusicOptionsPage> {
 public:
     MusicOptionsPageImpl()
-        : UiPageImpl(PageKind::FullScreen), artistView(Fonts_getMedium(), true), titleView(Fonts_getHeading(), false) {
+        : UiPageImpl(PageKind::FullScreen) {
         screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
-        artistView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        titleView.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
         // The dim over the player that shows behind the panel: 62% of the page color of the board
         SDL_Color dim = Theme_getColor(THEME_ROLE_PAGE_BACKGROUND, false);
         dim.a         = 158;
@@ -63,8 +62,8 @@ public:
 
     void onEnter() override {
         if (const TrackInfo* info = Player_getTrackInfo()) {
-            artistView.setText(info->artist[0] ? info->artist : "Unknown Artist");
-            titleView.setText(info->title[0] ? info->title : "Unknown Title");
+            header.setMeta(info->artist[0] ? info->artist : "Unknown Artist");
+            header.setTitle(info->title[0] ? info->title : "Unknown Title");
         }
         artView.setArt(album_art_is_fetching() ? nullptr : Player_getAlbumArt());
         panel.setRows(readRows());
@@ -75,14 +74,7 @@ public:
         context.layoutChild(artView, SDL_Rect{screen.w - screen.w * 620 / 1024, 0, screen.w * 620 / 1024, screen.h});
         context.layoutChild(dimView, context.getMaxRect());
         context.layoutChild(screenView, context.getMaxRect());
-        const int x               = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        const int y               = screen.h * 132 / 768;
-        const int width           = screen.w * 440 / 1024;
-        UiLayoutContext measuring = context.createMeasuringContext();
-        const int artistHeight    = measuring.layoutChild(artistView, SDL_Rect{0, 0, width, screen.h}).getSize().h;
-        context.layoutChild(artistView, SDL_Rect{x, y, width, artistHeight});
-        const int titleHeight = measuring.layoutChild(titleView, SDL_Rect{0, 0, width, screen.h}).getSize().h;
-        context.layoutChild(titleView, SDL_Rect{x, y + artistHeight + SCALE1(6), width, titleHeight});
+        context.layoutChild(header, context.getMaxRect());
         context.layoutChild(panel, context.getMaxRect());
     }
 
@@ -159,8 +151,7 @@ private:
     ArtFadeView artView;
     BoxView dimView;
     ScreenView screenView{Fonts_getLarge()};
-    TextView artistView;
-    TextView titleView;
+    OptionsHeaderView header;
     OptionsPanelView panel;
 };
 

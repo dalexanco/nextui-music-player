@@ -97,6 +97,7 @@ TESTS   += $(BIN)/test_activity_clock
 TESTS   += $(BIN)/test_page_stack
 TESTS   += $(BIN)/test_ui_compositor
 TESTS   += $(BIN)/test_source_gradient
+TESTS   += $(BIN)/test_rounded_rect
 TESTS   += $(BIN)/test_detail_panel_layout
 TESTS   += $(BIN)/test_browser_nav
 TESTS   += $(BIN)/test_options_panel_layout
@@ -249,6 +250,10 @@ $(BIN)/test_ui_compositor: test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) $(SRC)/ui
 $(BIN)/test_source_gradient: test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp \
                             $(SRC)/ui/view/source_gradient.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp
+
+$(BIN)/test_rounded_rect: test_rounded_rect.cpp $(SRC)/ui/view/rounded_rect.cpp $(SRC)/ui/view/rounded_rect.hpp \
+                          test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_rounded_rect.cpp $(SRC)/ui/view/rounded_rect.cpp
 
 $(BIN)/test_detail_panel_layout: test_detail_panel_layout.cpp $(SRC)/ui/view/detail_panel_layout.cpp \
                                  $(SRC)/ui/view/detail_panel_layout.hpp $(SRC)/ui/view/source_gradient.cpp \

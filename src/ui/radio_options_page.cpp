@@ -9,6 +9,7 @@
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/art_fade_view.hpp"
 #include "ui/view/box_view.hpp"
+#include "ui/view/options_header_view.hpp"
 #include "ui/view/options_panel_view.hpp"
 #include "ui/view/screen_view.hpp"
 #include "ui_fonts.h"
@@ -32,19 +33,15 @@ public:
     RadioOptionsPageImpl(std::string url, std::string name, std::string genre, bool player)
         : UiPageImpl(PageKind::FullScreen),
           player(player),
-          url(std::move(url)),
-          genreView(Fonts_getMedium(), true),
-          titleView(Fonts_getHeading(), false) {
+          url(std::move(url)) {
         screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
-        genreView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        titleView.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
         // The dim over the list that shows behind the panel
         SDL_Color dim = Theme_getColor(THEME_ROLE_PAGE_BACKGROUND, false);
         dim.a         = 158;
         dimView.setColor(dim);
         artView.setSource(THEME_SOURCE_RADIO);
-        genreView.setText(genre.empty() ? "Radio" : genre);
-        titleView.setText(name);
+        header.setMeta(genre.empty() ? "Radio" : genre);
+        header.setTitle(name);
         panel.setScope("STATION");
     }
 
@@ -62,14 +59,7 @@ public:
         context.layoutChild(artView, SDL_Rect{screen.w - screen.w * 620 / 1024, 0, screen.w * 620 / 1024, screen.h});
         context.layoutChild(dimView, context.getMaxRect());
         context.layoutChild(screenView, context.getMaxRect());
-        const int x               = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        const int y               = screen.h * 132 / 768;
-        const int width           = screen.w * 440 / 1024;
-        UiLayoutContext measuring = context.createMeasuringContext();
-        const int genreHeight     = measuring.layoutChild(genreView, SDL_Rect{0, 0, width, screen.h}).getSize().h;
-        context.layoutChild(genreView, SDL_Rect{x, y, width, genreHeight});
-        const int titleHeight = measuring.layoutChild(titleView, SDL_Rect{0, 0, width, screen.h}).getSize().h;
-        context.layoutChild(titleView, SDL_Rect{x, y + genreHeight + SCALE1(6), width, titleHeight});
+        context.layoutChild(header, context.getMaxRect());
         context.layoutChild(panel, context.getMaxRect());
     }
 
@@ -152,8 +142,7 @@ private:
     ArtFadeView artView;
     BoxView dimView;
     ScreenView screenView{Fonts_getLarge()};
-    TextView genreView;
-    TextView titleView;
+    OptionsHeaderView header;
     OptionsPanelView panel;
 };
 

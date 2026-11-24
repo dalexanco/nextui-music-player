@@ -6,9 +6,16 @@
 #include "ui/view/text_view.hpp"
 #include "ui/view/ui_view.hpp"
 
-/** The ground and the border of a dialog. */
+/**
+ * The ground and the border of a dialog. With the setting "Source colours" off it is the flat
+ * rectangle with a 2 px border of NextUI; with it on, a rounded surface (anti-aliased, see
+ * renderRoundedRect()) with a thin edge, or with no edge for a panel.
+ */
 class DialogFrameView : public UiView {
 public:
+    /** Draws a panel with no edge in the rounded look. The square look keeps its border. */
+    void setBorderless(bool value);
+
     /** Draws the border in `color` in place of the primary color of the theme. */
     void setEdgeColor(SDL_Color color);
     /** Goes back to the primary color of the theme. */
@@ -19,6 +26,7 @@ public:
 
 private:
     bool hasEdgeColor = false;
+    bool borderless   = false;
     SDL_Color edgeColor{};
     bool dirty = true;
 };
