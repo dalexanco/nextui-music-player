@@ -112,6 +112,7 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 
 **1.1 Main menu** — native already. Per-entry accent, preview panel of the focused entry, *Resume* row on one line.
 - Files: `main_menu_page.cpp`. Board: `Main`. Validation: screenshots 01–02 of the audit.
+- **Status: done (not validated on device)** — `getSource()` returns the source of the focused entry (it is read at each layout, so no new API was needed: the background, pills and tile follow the cursor); preview `DetailPanelView` per entry (Now Playing: track, artist, progress; Resume: track and position). The Resume row was already one line.
 
 **1.2 Library** — native already. List with the detail panel (art, artist, position).
 - Files: `library_page.cpp`. Board: `tpl-liste-musique`.

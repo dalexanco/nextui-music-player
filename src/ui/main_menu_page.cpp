@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "background.h"
+#include "player.h"
 #include "error.h"
 #include "resume.h"
 #include "selfupdate.h"
@@ -18,6 +19,7 @@
 #include "ui/radio_page.hpp"
 #include "ui/resume_page.hpp"
 #include "ui/settings_page.hpp"
+#include "ui/view/detail_panel_view.hpp"
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
 #include "ui/view/list_screen_view.hpp"
@@ -100,6 +102,73 @@ std::string getRowLabel(MenuItem item) {
     return "";
 }
 
+/** Returns the source whose accent the preview of item takes. */
+ThemeSource getItemSource(MenuItem item) {
+    switch (item) {
+        case MenuItem::NowPlaying:
+            switch (Background_getActive()) {
+                case BG_RADIO:   return THEME_SOURCE_RADIO;
+                case BG_PODCAST: return THEME_SOURCE_PODCAST;
+                default:         return THEME_SOURCE_MUSIC;
+            }
+        case MenuItem::Resume:
+        case MenuItem::Library:  return THEME_SOURCE_MUSIC;
+        case MenuItem::Radio:    return THEME_SOURCE_RADIO;
+        case MenuItem::Podcast:  return THEME_SOURCE_PODCAST;
+        case MenuItem::Settings:
+        case MenuItem::None:     break;
+    }
+    return THEME_SOURCE_NEUTRAL;
+}
+
+/** Returns "m:ss" for a time in milliseconds. */
+std::string formatTime(int ms) {
+    const int seconds = ms > 0 ? ms / 1000 : 0;
+    return std::to_string(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + std::to_string(seconds % 60);
+}
+
+/** Fills the preview panel for item: a tile in the accent of its source, then one line of context. */
+void fillPreview(DetailPanelView& panel, MenuItem item, int position, int count) {
+    const ThemeSource source = getItemSource(item);
+    std::string title        = getRowLabel(item);
+    std::string line;
+    std::string times;
+    int percent = -1;
+    switch (item) {
+        case MenuItem::NowPlaying: {
+            const TrackInfo* info = Background_getActive() == BG_MUSIC ? Player_getTrackInfo() : nullptr;
+            if (info && info->title[0]) {
+                title = info->title;
+                line  = info->artist;
+                if (info->duration_ms > 0) {
+                    percent = Player_getPosition() * 100 / info->duration_ms;
+                    times   = formatTime(Player_getPosition()) + " / " + formatTime(info->duration_ms);
+                }
+            } else {
+                line = getNowPlayingSource();
+            }
+            break;
+        }
+        case MenuItem::Resume: {
+            const ResumeState* state = Resume_getState();
+            title                    = state ? state->track_name : "Resume";
+            line                     = "Resume where you stopped";
+            if (state) times = formatTime(state->position_ms);
+            break;
+        }
+        case MenuItem::Library:  title = "Library"; line = "Files, playlists and downloads"; break;
+        case MenuItem::Radio:    title = "Online Radio"; line = "Internet stations"; break;
+        case MenuItem::Podcast:  title = "Podcasts"; line = "Subscriptions and episodes"; break;
+        case MenuItem::Settings: title = "Settings"; line = "Screen, sound and updates"; break;
+        case MenuItem::None:     break;
+    }
+    panel.getArt().setFallback(title, source);
+    panel.getInfo().setLine(line);
+    panel.getInfo().setProgress(percent);
+    panel.getInfo().setPosition("Item " + std::to_string(position + 1) + " of " + std::to_string(count));
+    panel.getInfo().setTimes(times);
+}
+
 /** The rows of the main menu, and the view of each row. */
 class MainMenuListAdapter final : public ListAdapter {
 public:
@@ -149,6 +218,9 @@ public:
 
     HelpId getHelpId() const override { return HELP_MAIN_MENU; }
 
+    /** With source colours, the page takes the accent of the entry under the cursor */
+    ThemeSource getSource() const override { return getItemSource(selectedItem); }
+
     void onEnter() override {
         items.setRows(getRows());
         screenView.setAdapter(items);
@@ -158,7 +230,11 @@ public:
         Error_showToast();
     }
 
-    void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
+    void layout(UiLayoutContext& context) override {
+        // The panel belongs to the source colours look, and the setting can change between frames
+        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        context.layoutChild(screenView, context.getMaxRect());
+    }
 
     /** A legacy module can change the playback, and with it the rows and their labels */
     void resume() override { refreshRows(); }
@@ -179,11 +255,21 @@ public:
     }
 
 private:
-    void onSelectionChanged(int listItemPosition) override { selectedItem = items.getItem(listItemPosition); }
+    void onSelectionChanged(int listItemPosition) override {
+        selectedItem = items.getItem(listItemPosition);
+        updatePanel();
+    }
+
+    /** Fills the preview of the focused entry. It also follows the track of a Now Playing row. */
+    void updatePanel() {
+        if (selectedItem == MenuItem::None) return;
+        fillPreview(panel, selectedItem, list.getSelectedIndex(), items.getCount());
+    }
 
     void refreshRows() {
         updateRowMap();
         updateLabels();
+        updatePanel();
         Error_showToast();
     }
 
@@ -271,6 +357,7 @@ private:
     bool exiting = false;
 
     ListScreenView screenView{Fonts_getLarge()};
+    DetailPanelView panel;
     ListScreenController list{screenView, getScheduler(), *this};
     /** The item of the row of the cursor */
     MenuItem selectedItem = MenuItem::None;
