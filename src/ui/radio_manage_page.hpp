@@ -6,7 +6,10 @@
 
 #include "ui/page/ui_page.hpp"
 
-/** Runs Manage Stations, where the user adds a station to the station list or removes one. */
+/**
+ * Manage Stations: the stations of the user with a star on the favourites. A listens to a station,
+ * X marks it as favourite, and Y opens its options (rename, remove, add stations).
+ */
 class RadioManagePage final : public UiPage {
 public:
     using Result = std::monostate;

@@ -134,11 +134,12 @@ static const ControlHelp radio_playing_controls[] = {
     {NULL, NULL}
 };
 
-// Radio manage stations controls - country list (A/B shown in footer)
+// Radio manage stations controls (A/B shown in footer)
 static const ControlHelp radio_manage_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Manual Setup Help"},
+    {"X", "Favourite"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
