@@ -47,7 +47,12 @@ struct InfoBlockRects {
  * Stacks the line, the progress bar, and the row of the position and of the times, `gap` apart. The
  * position is at the left of the last row, and the times are at its right, `timesWidth` wide. The
  * position takes the room that the times leave.
+ *
+ * With `positionWidth`, the width that the position needs, the times go to a row of their own under
+ * it when the two do not fit side by side, thus the position keeps the whole width and does not
+ * shrink to a few letters. Pass 0 to keep both on one row.
  */
-InfoBlockRects layoutInfoBlock(int width, int lineHeight, int barHeight, int rowHeight, int gap, int timesWidth);
+InfoBlockRects layoutInfoBlock(int width, int lineHeight, int barHeight, int rowHeight, int gap, int timesWidth,
+                               int positionWidth = 0);
 
 #endif

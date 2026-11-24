@@ -87,6 +87,20 @@ TEST(times_sit_at_the_right_and_the_position_takes_the_rest) {
     CHECK_EQ_INT(rects.position.x + rects.position.w + 15, rects.times.x);
 }
 
+TEST(times_go_under_a_position_that_does_not_fit_beside_them) {
+    const InfoBlockRects rects = layoutInfoBlock(341, 42, 9, 36, 15, 200, 250);
+    CHECK_EQ_INT(rects.position.w, 341);
+    CHECK_EQ_INT(rects.times.x, 0);
+    CHECK_EQ_INT(rects.times.y, rects.position.y + 36);
+    CHECK_EQ_INT(rects.height, 42 + 15 + 9 + 15 + 36 + 36);
+}
+
+TEST(times_stay_beside_a_position_that_fits) {
+    const InfoBlockRects rects = layoutInfoBlock(341, 42, 9, 36, 15, 100, 150);
+    CHECK_EQ_INT(rects.times.y, rects.position.y);
+    CHECK_EQ_INT(rects.height, 42 + 15 + 9 + 15 + 36);
+}
+
 TEST(times_wider_than_the_block_are_cut_to_it) {
     const InfoBlockRects rects = layoutInfoBlock(100, 42, 9, 36, 15, 500);
     CHECK_EQ_INT(rects.times.w, 100);
@@ -132,6 +146,8 @@ int main() {
     RUN(art_has_no_negative_size_in_a_tiny_panel);
     RUN(info_rows_stack_in_order_with_the_gap);
     RUN(times_sit_at_the_right_and_the_position_takes_the_rest);
+    RUN(times_go_under_a_position_that_does_not_fit_beside_them);
+    RUN(times_stay_beside_a_position_that_fits);
     RUN(times_wider_than_the_block_are_cut_to_it);
     RUN(tile_has_transparent_corners_and_an_opaque_middle);
     RUN(tile_goes_from_the_first_color_to_the_second);

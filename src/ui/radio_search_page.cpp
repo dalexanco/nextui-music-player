@@ -183,7 +183,7 @@ private:
     void updatePanel(int index) {
         const CuratedStation* station = state.getStation(index);
         if (!station) {
-            panel.getArt().setFallback("Search", THEME_SOURCE_RADIO);
+            panel.getArt().setFallback(THEME_SOURCE_RADIO);
             panel.getInfo().setLine("Name, genre or country");
             panel.getInfo().setPosition(std::to_string(state.entries.size()) + " stations in the directory");
             panel.getInfo().setTimes("");

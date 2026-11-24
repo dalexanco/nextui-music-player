@@ -21,7 +21,7 @@ ShowPanelText makeShowPanelText(int index) {
 }
 
 void fillShowPanel(DetailPanelView& panel, const ShowPanelText& text) {
-    panel.getArt().setFallback(text.name, THEME_SOURCE_PODCAST);
+    panel.getArt().setFallback(THEME_SOURCE_PODCAST);
     bool loaded = false;
     if (!text.feedId.empty()) {
         char directory[512];

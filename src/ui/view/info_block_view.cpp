@@ -13,10 +13,17 @@ extern "C" {
 }
 
 InfoBlockView::InfoBlockView()
-    : lineView(Fonts_getMedium(), true), positionView(Fonts_getSmall(), true), timesView(Fonts_getSmall(), false) {
+    : lineView(Fonts_getMedium(), false), positionView(Fonts_getSmall(), false), timesView(Fonts_getSmall(), false) {
     lineView.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     positionView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
     timesView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+}
+
+void InfoBlockView::onAttach(UiContext&) {
+    // A view that left the layout stopped: each text starts again, and moves only if it is clipped
+    lineView.startScrolling();
+    positionView.startScrolling();
+    timesView.startScrolling();
 }
 
 void InfoBlockView::setProgress(int percent) {
@@ -32,9 +39,11 @@ void InfoBlockView::layout(UiLayoutContext& context) {
     const int lineHeight = measuring.layoutChild(lineView, room).getSize().h;
     const int rowHeight  = measuring.layoutChild(positionView, room).getSize().h;
     const int timesWidth = measuring.layoutChild(timesView, room).getSize().w;
+    // The measure of the position is its whole text, which is cut to the width of the block
+    const int positionWidth = measuring.layoutChild(positionView, room).getSize().w;
 
     const int gap               = SCALE1(5);
-    const InfoBlockRects rects  = layoutInfoBlock(width, lineHeight, SCALE1(3), rowHeight, gap, timesWidth);
+    const InfoBlockRects rects  = layoutInfoBlock(width, lineHeight, SCALE1(3), rowHeight, gap, timesWidth, positionWidth);
     context.setSize(UiSize{width, rects.height});
     context.layoutChild(lineView, rects.line);
     if (barShown) context.layoutChild(barView, rects.bar);

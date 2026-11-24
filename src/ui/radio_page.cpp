@@ -127,7 +127,8 @@ public:
 
     void layout(UiLayoutContext& context) override {
         // The panel belongs to the source colours look, and the setting can change between frames
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        // An empty list has nothing to show in a panel
+        screenView.setSidePanel(Theme_isSourceColoursEnabled() && stations.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
         // The notes of the old look would run under the panel of the new one
         if (Theme_isSourceColoursEnabled() || Radio_hasUserStations() || stations.getCount() == 0) return;

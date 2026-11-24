@@ -12,6 +12,9 @@
  * author or the source), a progress bar, the position (`Track 2 of 15`) at the left and the elapsed
  * and total time (`1:20 / 3:45`) at the right. A row with no text takes no room, but keeps its
  * place, thus the panel does not move. The bar shows only after setProgress().
+ *
+ * A text that is wider than its room scrolls, as the rows of a list do, and does not end in "...".
+ * The times go under the position when the two do not fit on one row.
  */
 class InfoBlockView : public UiLayout {
 public:
@@ -25,6 +28,10 @@ public:
     void setProgress(int percent);
 
     void layout(UiLayoutContext& context) override;
+
+protected:
+    /** The texts scroll again each time the block comes back to the layout. */
+    void onAttach(UiContext& context) override;
 
 private:
     TextView lineView;

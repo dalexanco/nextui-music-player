@@ -178,7 +178,8 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        // An empty list has nothing to show in a panel
+        screenView.setSidePanel(Theme_isSourceColoursEnabled() && rows.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 
@@ -259,7 +260,7 @@ private:
     void updatePanel(int index) {
         const CatalogEntry entry = data.get(index);
         if (entry.title.empty()) return;
-        panel.getArt().setFallback(entry.title, THEME_SOURCE_PODCAST);
+        panel.getArt().setFallback(THEME_SOURCE_PODCAST);
         const std::string path = getPodcastCoverPath(entry.itunesId.c_str());
         // A show with no cover in the cache keeps the tile: the cover comes when the cursor rests
         if (!entry.itunesId.empty()) {

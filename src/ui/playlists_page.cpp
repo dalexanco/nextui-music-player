@@ -82,7 +82,8 @@ public:
     void resume() override { reloadKeepingCursor(); }
 
     void layout(UiLayoutContext& context) override {
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        // An empty list has nothing to show in a panel
+        screenView.setSidePanel(Theme_isSourceColoursEnabled() && playlists.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 
@@ -110,11 +111,9 @@ private:
     void updatePanel(int index) {
         const PlaylistInfo* playlist = playlists.get(index);
         if (!playlist) return;
-        panel.getArt().setFallback(playlist->name, THEME_SOURCE_MUSIC);
+        panel.getArt().setFallback(THEME_SOURCE_MUSIC);
         panel.getInfo().setLine(std::to_string(playlist->track_count) +
                                 (playlist->track_count == 1 ? " track" : " tracks"));
-        panel.getInfo().setPosition("Playlist " + std::to_string(index + 1) + " of " +
-                                    std::to_string(playlists.getCount()));
     }
 
     void openSelected() {

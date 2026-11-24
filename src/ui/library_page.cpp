@@ -105,10 +105,8 @@ private:
     /** Fills the detail panel for the row at `index`: its art tile, what it holds, and its place in Library */
     void onSelectionChanged(int index) override {
         if (index < 0 || index >= kRowCount) return;
-        panel.getArt().setFallback(kRows[index].label, THEME_SOURCE_MUSIC);
+        panel.getArt().setFallback(THEME_SOURCE_MUSIC);
         panel.getInfo().setLine(getRowLine(kRows[index]));
-        panel.getInfo().setProgress((index + 1) * 100 / kRowCount);
-        panel.getInfo().setPosition("Item " + std::to_string(index + 1) + " of " + std::to_string(kRowCount));
     }
 
     /** Returns what the row holds right now: the count of playlists, the last track played. */

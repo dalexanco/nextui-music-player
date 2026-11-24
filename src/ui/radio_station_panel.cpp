@@ -29,7 +29,7 @@ StationPanelText makeStationPanelText(const RadioStation& station, const std::st
 }
 
 void fillStationPanel(DetailPanelView& panel, const StationPanelText& text) {
-    panel.getArt().setFallback(text.name, THEME_SOURCE_RADIO);
+    panel.getArt().setFallback(THEME_SOURCE_RADIO);
     panel.getInfo().setLine(text.line);
     panel.getInfo().setPosition(text.detail);
     panel.getInfo().setTimes(text.status);

@@ -4,7 +4,6 @@
 #include <string>
 
 #include "ui/view/bitmap_view.hpp"
-#include "ui/view/text_view.hpp"
 #include "ui/view/ui_layout.hpp"
 #include "ui_theme.h"
 
@@ -23,27 +22,25 @@ private:
 
 /**
  * The art of an item, filling the rectangle that the parent gives it. It shows the bitmap while it
- * has one. Else it shows a generated tile in the accent of its source, with the title at the
- * bottom left. The parent gives it a square.
+ * has one. Else it shows a generated tile in the accent of its source. It never draws a text over
+ * the image: the name of the item is in the list and in the info block under it. The parent gives
+ * it a square.
  */
 class ArtTileView : public UiLayout {
 public:
-    ArtTileView();
-
     /** Takes `bitmap`, with straight alpha, and frees it with the view. A null bitmap shows the tile. */
     void setBitmap(SDL_Surface* bitmap) { bitmapView.setBitmap(bitmap); }
     bool loadFile(const char* path) { return bitmapView.loadFile(path); }
     bool hasBitmap() const { return bitmapView.hasBitmap(); }
 
-    /** Sets the title of the tile and the source whose accent it takes. */
-    void setFallback(const std::string& title, ThemeSource source);
+    /** Sets the source whose accent the generated tile takes. */
+    void setFallback(ThemeSource source) { tileView.setSource(source); }
 
     void layout(UiLayoutContext& context) override;
 
 private:
     BitmapView bitmapView;
     ArtTileFallbackView tileView;
-    TextView titleView;
 };
 
 #endif

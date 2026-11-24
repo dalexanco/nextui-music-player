@@ -87,7 +87,8 @@ public:
     void resume() override { reloadKeepingCursor(); }
 
     void layout(UiLayoutContext& context) override {
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        // An empty list has nothing to show in a panel
+        screenView.setSidePanel(Theme_isSourceColoursEnabled() && tracks.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 
@@ -114,8 +115,8 @@ private:
     void updatePanel(int index) {
         const PlaylistTrack* track = tracks.get(index);
         if (!track) return;
-        panel.getArt().setFallback(track->name, THEME_SOURCE_MUSIC);
-        panel.getInfo().setLine(name);
+        panel.getArt().setFallback(THEME_SOURCE_MUSIC);
+        panel.getInfo().setLine(track->name);
         panel.getInfo().setPosition("Track " + std::to_string(index + 1) + " of " + std::to_string(tracks.getCount()));
     }
 

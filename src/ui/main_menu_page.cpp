@@ -127,19 +127,23 @@ std::string formatTime(int ms) {
     return std::to_string(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + std::to_string(seconds % 60);
 }
 
-/** Fills the preview panel for item: a tile in the accent of its source, then one line of context. */
-void fillPreview(DetailPanelView& panel, MenuItem item, int position, int count) {
+/**
+ * Fills the preview panel for item: a tile in the accent of its source, and under it what the item
+ * holds. The name of the item is in the list, thus nothing is written over the tile; a track or an
+ * episode that plays names itself in the line.
+ */
+void fillPreview(DetailPanelView& panel, MenuItem item) {
     const ThemeSource source = getItemSource(item);
-    std::string title        = getRowLabel(item);
     std::string line;
+    std::string detail;
     std::string times;
     int percent = -1;
     switch (item) {
         case MenuItem::NowPlaying: {
             const TrackInfo* info = Background_getActive() == BG_MUSIC ? Player_getTrackInfo() : nullptr;
             if (info && info->title[0]) {
-                title = info->title;
-                line  = info->artist;
+                line   = info->title;
+                detail = info->artist;
                 if (info->duration_ms > 0) {
                     percent = Player_getPosition() * 100 / info->duration_ms;
                     times   = formatTime(Player_getPosition()) + " / " + formatTime(info->duration_ms);
@@ -151,21 +155,21 @@ void fillPreview(DetailPanelView& panel, MenuItem item, int position, int count)
         }
         case MenuItem::Resume: {
             const ResumeState* state = Resume_getState();
-            title                    = state ? state->track_name : "Resume";
-            line                     = "Resume where you stopped";
+            line                     = state ? state->track_name : "Resume";
+            detail                   = "Resume where you stopped";
             if (state) times = formatTime(state->position_ms);
             break;
         }
-        case MenuItem::Library:  title = "Library"; line = "Files, playlists and downloads"; break;
-        case MenuItem::Radio:    title = "Online Radio"; line = "Internet stations"; break;
-        case MenuItem::Podcast:  title = "Podcasts"; line = "Subscriptions and episodes"; break;
-        case MenuItem::Settings: title = "Settings"; line = "Screen, sound and updates"; break;
+        case MenuItem::Library:  line = "Files, playlists and downloads"; break;
+        case MenuItem::Radio:    line = "Internet stations"; break;
+        case MenuItem::Podcast:  line = "Subscriptions and episodes"; break;
+        case MenuItem::Settings: line = "Screen, sound and updates"; break;
         case MenuItem::None:     break;
     }
-    panel.getArt().setFallback(title, source);
+    panel.getArt().setFallback(source);
     panel.getInfo().setLine(line);
     panel.getInfo().setProgress(percent);
-    panel.getInfo().setPosition("Item " + std::to_string(position + 1) + " of " + std::to_string(count));
+    panel.getInfo().setPosition(detail);
     panel.getInfo().setTimes(times);
 }
 
@@ -263,7 +267,7 @@ private:
     /** Fills the preview of the focused entry. It also follows the track of a Now Playing row. */
     void updatePanel() {
         if (selectedItem == MenuItem::None) return;
-        fillPreview(panel, selectedItem, list.getSelectedIndex(), items.getCount());
+        fillPreview(panel, selectedItem);
     }
 
     void refreshRows() {

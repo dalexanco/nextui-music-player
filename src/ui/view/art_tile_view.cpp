@@ -3,7 +3,6 @@
 #include <algorithm>
 
 #include "ui/view/source_gradient.hpp"
-#include "ui_fonts.h"
 
 // The NextUI headers declare C functions and have no guard of their own
 extern "C" {
@@ -38,15 +37,6 @@ void ArtTileFallbackView::draw(UiDrawContext& context) {
                   SCALE1(8));
 }
 
-ArtTileView::ArtTileView() : titleView(Fonts_getMedium(), true) {
-    titleView.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-}
-
-void ArtTileView::setFallback(const std::string& title, ThemeSource source) {
-    titleView.setText(title);
-    tileView.setSource(source);
-}
-
 void ArtTileView::layout(UiLayoutContext& context) {
     const UiSize space = context.getMaxSize();
     if (bitmapView.hasBitmap()) {
@@ -54,9 +44,4 @@ void ArtTileView::layout(UiLayoutContext& context) {
         return;
     }
     context.layoutChild(tileView, SDL_Rect{0, 0, space.w, space.h});
-    const int padding         = SCALE1(PADDING) * 2;
-    const int textWidth       = std::max(0, space.w - padding * 2);
-    UiLayoutContext measuring = context.createMeasuringContext();
-    const int textHeight      = measuring.layoutChild(titleView, SDL_Rect{0, 0, textWidth, space.h}).getSize().h;
-    context.layoutChild(titleView, SDL_Rect{padding, std::max(0, space.h - padding - textHeight), textWidth, textHeight});
 }
