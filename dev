@@ -1846,6 +1846,12 @@ def build_desktop(kind):
     elif system == "Darwin":
         env["CROSS_COMPILE"] = "/usr/local/bin/"
         env["PREFIX"] = "/opt/homebrew"
+        # Flags that a shell profile exports for another toolchain (stale Intel
+        # /usr/local paths) leak through make into the cmake compiler test of
+        # libchdr, which then links -lchdr before it exists.
+        for key in ("LDFLAGS", "CPPFLAGS", "CFLAGS", "CXXFLAGS", "LIBRARY_PATH"):
+            env.pop(key, None)
+        env["PKG_CONFIG_PATH"] = "/opt/homebrew/lib/pkgconfig:/opt/homebrew/share/pkgconfig"
     else:
         raise DevError("Unsupported host OS: " + system)
     env["PREFIX_LOCAL"] = str(prefix_local)

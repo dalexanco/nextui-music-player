@@ -323,6 +323,16 @@ outside `/tmp`. Without bwrap, as on macOS, `--sdcard` has no effect and `dev`
 warns.
 
 
+### Desktop build on macOS (Apple Silicon)
+
+`./dev build desktop` needs Homebrew (`sdl2 sdl2_image sdl2_ttf libzip sqlite
+libsamplerate cmake`). It drops `LDFLAGS`, `CPPFLAGS`, `CFLAGS`, `CXXFLAGS` and
+`LIBRARY_PATH` from the environment of the build and points `PKG_CONFIG_PATH` at
+`/opt/homebrew`: stale exports (e.g. Intel `/usr/local/opt/...` paths) otherwise
+reach the cmake compiler test of libchdr, which fails with `library 'chdr' not
+found`. Delete `/var/tmp/nextui/.desktop_setup_ok` to redo the NextUI base build.
+
+
 ### Project Structure
 
 ```
