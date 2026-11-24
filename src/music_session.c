@@ -11,6 +11,7 @@
 #include "player.h"
 #include "playlist_m3u.h"
 #include "settings.h"
+#include "sleep_timer.h"
 
 // The interval of the position save while a track plays
 #define POSITION_SAVE_MS 5000
@@ -23,6 +24,7 @@ static bool shuffle_enabled = false;
 static bool repeat_enabled = false;
 static uint32_t last_position_save = 0;
 static unsigned track_serial = 0;
+static SleepTimer sleep_timer = {0};
 
 // The seek of a Resume. It applies to the first start only, and only to the saved file.
 typedef struct {
@@ -92,6 +94,7 @@ static void stop_playback(bool save) {
     Playlist_free(&queue);
     source_dir_id = 0;
     source_playlist_id = 0;
+    SleepTimer_set(&sleep_timer, 0, 0);
     if (Background_getActive() == BG_MUSIC) Background_setActive(BG_NONE);
     ModuleCommon_setAutosleepDisabled(false);
 }
@@ -199,6 +202,11 @@ bool MusicSession_startResume(const ResumeState* resume) {
 
 void MusicSession_tick(void) {
     if (queue.track_count <= 0) return;
+    // The sleep timer ends the music, also while the screen is dark
+    if (SleepTimer_takeExpired(&sleep_timer, SDL_GetTicks())) {
+        MusicSession_stop();
+        return;
+    }
     Player_update();
 
     PlayerState state = Player_getState();
@@ -284,6 +292,28 @@ bool MusicSession_playTrack(int index) {
         return false;
     }
     return true;
+}
+
+bool MusicSession_toggleLyrics(void) {
+    // Lyrics that are off hide, and keep their data. Lyrics that come back fetch only where the
+    // track has none.
+    bool on = Settings_toggleBool(&SETTING_LYRICS_ENABLED);
+    if (on) {
+        const TrackInfo* info = Player_getTrackInfo();
+        if (info) {
+            Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000,
+                         Player_getCurrentFile(), Player_getEmbeddedLyrics());
+        }
+    }
+    return on;
+}
+
+void MusicSession_setSleepTimer(int minutes) {
+    SleepTimer_set(&sleep_timer, minutes, SDL_GetTicks());
+}
+
+int MusicSession_getSleepTimer(void) {
+    return sleep_timer.minutes;
 }
 
 bool MusicSession_isShuffle(void) {

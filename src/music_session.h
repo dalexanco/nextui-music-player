@@ -68,6 +68,15 @@ int MusicSession_getCurrentIndex(void);
 // Returns: true when a track plays
 bool MusicSession_playTrack(int index);
 
+// The sleep timer stops the music when it ends. `minutes` of 0 turns it off.
+void MusicSession_setSleepTimer(int minutes);
+// Returns the length of the running timer in minutes, or 0 for none
+int MusicSession_getSleepTimer(void);
+
+// Turns the lyrics on or off, and fetches those of the current track where they come back on.
+// Returns: true when the lyrics are on
+bool MusicSession_toggleLyrics(void);
+
 bool MusicSession_isShuffle(void);
 bool MusicSession_isRepeat(void);
 void MusicSession_toggleShuffle(void);

@@ -14,13 +14,14 @@
 #include "player.h"
 #include "seek_scan.h"
 #include "settings.h"
+#include "ui/music_options_page.hpp"
 #include "ui/music_queue_page.hpp"
 #include "ui/music_player_layout.hpp"
 #include "ui/now_playing_page.hpp"
+#include "ui/view/art_fade_view.hpp"
 #include "ui/view/box_view.hpp"
 #include "ui/view/progress_bar_view.hpp"
 #include "ui/view/screen_view.hpp"
-#include "ui/view/source_gradient.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
@@ -45,75 +46,12 @@ constexpr size_t kMaxLyricRows = 12;
 /** The gap between two lyric rows, in pixels before the scale of the screen */
 constexpr int kLyricRowGap = 2;
 
-constexpr const char* kLeftHints[]       = {"Y", "SHUFFLE", nullptr};
+constexpr const char* kLeftHints[]       = {"Y", "OPTIONS", nullptr};
 constexpr const char* kRightHintsPlaying[] = {"X", "QUEUE", "A", "PAUSE", nullptr};
 constexpr const char* kRightHintsPaused[]  = {"X", "QUEUE", "A", "PLAY", nullptr};
 
 /** Where the screen is: on, showing the wake hint before it goes dark, or dark */
 enum class ScreenMode : uint8_t { On, Hint, Off };
-
-/** The art of the track, over the right of the screen, with its left edge fading into the background. */
-class ArtFadeView : public UiView {
-public:
-    /** Shows `newArt`, which the player owns, or the generated tile for null. */
-    void setArt(SDL_Surface* newArt) {
-        if (newArt == art) return;
-        art   = newArt;
-        dirty = true;
-    }
-
-    bool isDirty() const override { return dirty; }
-
-    void draw(UiDrawContext& context) override {
-        dirty                = false;
-        SDL_Surface* surface = context.getSurface();
-        if (!surface) return;
-        if (art && art->w > 0 && art->h > 0) {
-            drawCover(*art, *surface);
-        } else {
-            const SDL_Color accent = Theme_getAccent(THEME_SOURCE_MUSIC);
-            // The tile goes from a lighter accent to a darker one, as the art tile of the panels
-            //noinspection HardcodedColor
-            const SDL_Color white = {255, 255, 255, 255};
-            renderArtTile(static_cast<uint32_t*>(surface->pixels), surface->w, surface->h, surface->pitch / 4,
-                          Theme_mix(accent, white, 20), Theme_mix(accent, Theme_getDeep(THEME_SOURCE_MUSIC), 55), 0);
-        }
-        applyFade(*surface);
-    }
-
-private:
-    /** Scales the art to cover the surface, and crops what falls outside. */
-    static void drawCover(SDL_Surface& art, SDL_Surface& surface) {
-        const float scale = std::max(static_cast<float>(surface.w) / static_cast<float>(art.w),
-                                     static_cast<float>(surface.h) / static_cast<float>(art.h));
-        const int cropW   = std::min(art.w, static_cast<int>(static_cast<float>(surface.w) / scale));
-        const int cropH   = std::min(art.h, static_cast<int>(static_cast<float>(surface.h) / scale));
-        SDL_Rect source{(art.w - cropW) / 2, (art.h - cropH) / 2, cropW, cropH};
-        // The art covers the bitmap, thus its pixels replace the transparent ones
-        SDL_SetSurfaceBlendMode(&art, SDL_BLENDMODE_NONE);
-        SDL_BlitScaled(&art, &source, &surface, nullptr);
-    }
-
-    /** Multiplies the pixels by the fade of their column. The bitmap holds premultiplied alpha. */
-    static void applyFade(SDL_Surface& surface) {
-        const int fadeWidth = getArtFadeWidth(surface.w);
-        for (int y = 0; y < surface.h; y++) {
-            auto* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(surface.pixels) + static_cast<size_t>(y) * static_cast<size_t>(surface.pitch));
-            for (int x = 0; x < fadeWidth; x++) {
-                const uint32_t alpha = static_cast<uint32_t>(getArtFadeAlpha(x, surface.w, fadeWidth));
-                const uint32_t pixel = row[x];
-                const uint32_t a     = ((pixel >> 24) * alpha + 127) / 255;
-                const uint32_t r     = (((pixel >> 16) & 0xff) * alpha + 127) / 255;
-                const uint32_t g     = (((pixel >> 8) & 0xff) * alpha + 127) / 255;
-                const uint32_t b     = ((pixel & 0xff) * alpha + 127) / 255;
-                row[x]               = (a << 24) | (r << 16) | (g << 8) | b;
-            }
-        }
-    }
-
-    SDL_Surface* art = nullptr;
-    bool dirty       = true;
-};
 
 /** A pill under a chip */
 class PillView : public UiView {
@@ -291,13 +229,13 @@ public:
             case Button::A:         Player_togglePause(); return true;
             case Button::B:         leave(); return true;
             case Button::X:         getNavigator().open(makeMusicQueuePage()); return true;
-            case Button::Y:         MusicSession_toggleShuffle(); return true;
+            case Button::Y:         getNavigator().open(MusicOptionsPage{}); return true;
             case Button::DpadDown:
             case Button::L1:        MusicSession_prev(); return true;
             case Button::DpadUp:
             case Button::R1:        MusicSession_next(); return true;
             case Button::R2:
-            case Button::R3:        toggleLyrics(); return true;
+            case Button::R3:        MusicSession_toggleLyrics(); return true;
             case Button::Select:
                 ModuleCommon_startScreenOffHint();
                 // A screen that keeps its content locks the keys in place of the wake hint
@@ -316,16 +254,6 @@ private:
             MusicSession_stop();
         }
         close();
-    }
-
-    /** Lyrics that are off hide and keep their data. Lyrics that come back fetch where the track has none. */
-    void toggleLyrics() {
-        if (!Settings_toggleBool(&SETTING_LYRICS_ENABLED)) return;
-        const TrackInfo* info = Player_getTrackInfo();
-        if (info) {
-            Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000, Player_getCurrentFile(),
-                         Player_getEmbeddedLyrics());
-        }
     }
 
     /** Reads the track again where it changed: the texts, the chip of the format, the art. */

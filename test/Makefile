@@ -103,6 +103,8 @@ TESTS   += $(BIN)/test_ui_compositor
 TESTS   += $(BIN)/test_source_gradient
 TESTS   += $(BIN)/test_detail_panel_layout
 TESTS   += $(BIN)/test_browser_nav
+TESTS   += $(BIN)/test_options_panel_layout
+TESTS   += $(BIN)/test_sleep_timer
 TESTS   += $(BIN)/test_music_player_layout
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
@@ -258,6 +260,12 @@ $(BIN)/test_browser_nav: test_browser_nav.cpp $(SRC)/browser_nav.cpp $(SRC)/brow
 
 $(BIN)/test_music_player_layout: test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp $(SRC)/ui/music_player_layout.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp
+
+$(BIN)/test_sleep_timer: test_sleep_timer.c $(SRC)/sleep_timer.c $(SRC)/sleep_timer.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_sleep_timer.c $(SRC)/sleep_timer.c
+
+$(BIN)/test_options_panel_layout: test_options_panel_layout.cpp $(SRC)/ui/view/options_panel_layout.cpp $(SRC)/ui/view/options_panel_layout.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_options_panel_layout.cpp $(SRC)/ui/view/options_panel_layout.cpp
 
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c

@@ -149,6 +149,10 @@ progress row. Spectrum removed here. Lyrics stay a full-page mode until 1.8.
 
 **1.7 Options panel (Y)** — `OptionsPanelView` (right panel, title + scope, rows with `‹ value ›`) and the music options
 (shuffle, repeat, lyrics, sleep timer, add to playlist). Replaces the START help for per-track settings. Board: `tpl-options`.
+- **Status: done (built, not validated on device)** — `OptionsPanelView` (`ui/view/options_panel_view.*`, geometry in `options_panel_layout.*`, `test_options_panel_layout`) with `OptionRow {label, value}`, `‹ value ›` on the selected row, reusable by the radio and podcast players (`setScope`, `setRows`, `setValue`, `moveSelection`);
+  `MusicOptionsPage` (`Y` from the player: shuffle, repeat, lyrics, sleep timer 15/30/45/60 min, add to playlist through `AddToPlaylistPage`).
+  New logic: `sleep_timer.*` (`test_sleep_timer`, 8 tests) ticked by `MusicSession_tick`, so it also runs with the screen dark; `MusicSession_toggleLyrics()`.
+  The page is full-screen (art, dim, panel), not a `Dialog`, so the hint pills of the player do not show under its own.
 
 **1.8 Lyrics and help** — lyrics view in the new look; controls help page restyled.
 
