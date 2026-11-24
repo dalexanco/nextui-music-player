@@ -1,5 +1,6 @@
 #include "ui/view/button_hints_view.hpp"
 
+#include "ui/view/accent_pills.hpp"
 #include "ui_utils.h"
 
 // The NextUI headers declare C functions and have no guard of their own
@@ -20,9 +21,11 @@ void ButtonHintsView::setHints(const char* const* leftHints, const char* const* 
 
 void ButtonHintsView::layout(UiLayoutContext& context) {
     const HardwareBar bar = InputState::getInstance().getHardwareBar();
-    if (needsRender || bar != renderedBar) {
+    const uint32_t accent = Theme_getPillAccent();
+    if (needsRender || bar != renderedBar || accent != renderedAccent) {
         SDL_Surface* scratch = clearScratch();
         if (scratch) {
+            AccentPills pills;
             if (bar != HardwareBar::None) {
                 GFX_blitHardwareHints(scratch, static_cast<int>(bar));
             } else if (left) {
@@ -32,8 +35,9 @@ void ButtonHintsView::layout(UiLayoutContext& context) {
             const int height = SCALE1(PILL_SIZE);
             finishRender(SDL_Rect{0, scratch->h - SCALE1(PADDING) - height, scratch->w, height});
         }
-        needsRender = false;
-        renderedBar = bar;
+        needsRender    = false;
+        renderedBar    = bar;
+        renderedAccent = accent;
     }
     const SDL_Rect& rect = getScratchRect();
     context.setSize(UiSize{rect.w, rect.h});

@@ -50,6 +50,8 @@ private:
     StatusValues measuredValues;
     StatusValues pendingValues;
     uint32_t pendingSince = 0;
+    // The accent of the pills of the last render, or 0 for the pill color of the theme
+    uint32_t renderedAccent = 0;
     // The values changed during the last render, thus its pixels can be wrong
     bool renderUncertain = false;
 };

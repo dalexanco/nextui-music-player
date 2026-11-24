@@ -19,6 +19,8 @@ private:
     const char* const* left        = nullptr;
     const char* const* right       = nullptr;
     input::HardwareBar renderedBar = input::HardwareBar::None;
+    // The accent of the pills of the last render, or 0 for the pill color of the theme
+    uint32_t renderedAccent = 0;
 };
 
 #endif

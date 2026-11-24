@@ -52,7 +52,8 @@ public:
     /**
      * Sets the function that gives the palette of the background of a page from its source, or
      * an empty value for a flat background that the display clears. Without a function, no page
-     * has a background view. The stack asks it at each layout.
+     * has a background view. The stack calls it at each layout, before the layout of the page,
+     * thus the function can also publish the source to the views.
      */
     void setBackgroundPalette(std::function<std::optional<SourcePalette>(ThemeSource)> palette) {
         backgroundPalette = std::move(palette);

@@ -2,6 +2,8 @@
 
 #include <ctime>
 
+#include "ui/view/accent_pills.hpp"
+
 // The NextUI headers declare C functions and have no guard of their own
 extern "C" {
 #include "defines.h"
@@ -46,13 +48,16 @@ void StatusGroupView::layout(UiLayoutContext& context) {
     }
     const bool valuesChanged = values != measuredValues || renderUncertain;
     const bool valuesSettled = valuesChanged && now - pendingSince >= kSettleMs;
-    if (needsRender || bar != measuredBar || valuesSettled || state.isStatusChanged()) {
+    const uint32_t accent = Theme_getPillAccent();
+    if (needsRender || bar != measuredBar || valuesSettled || state.isStatusChanged() || accent != renderedAccent) {
         SDL_Surface* scratch = clearScratch();
         int width            = 0;
         // The platform draws the status group only where the screen has the room for it
         if (scratch && scratch->w >= SCALE1(320)) {
+            AccentPills pills;
             width = drawGroup(scratch, static_cast<int>(bar));
         }
+        renderedAccent = accent;
         const int x = scratch ? scratch->w - SCALE1(PADDING) - width : 0;
         finishRender(SDL_Rect{x, SCALE1(PADDING), width, SCALE1(PILL_SIZE)});
         needsRender    = false;

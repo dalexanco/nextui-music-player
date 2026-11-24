@@ -131,6 +131,39 @@ void Theme_init(SDL_Surface* screen) {
 #endif
 }
 
+// api.c defines it and api.h does not declare it. It maps the colours of the configuration again.
+int GFX_updateColors(void);
+
+static bool source_colours_enabled;
+static ThemeSource active_source = THEME_SOURCE_NEUTRAL;
+static uint32_t saved_platform_accent;
+
+static uint32_t pack_rgba(SDL_Color color) {
+    return ((uint32_t)color.r << 24) | ((uint32_t)color.g << 16) | ((uint32_t)color.b << 8) | 0xffu;
+}
+
+void Theme_setSourceColours(bool enabled, ThemeSource source) {
+    source_colours_enabled = enabled;
+    active_source = source;
+}
+
+uint32_t Theme_getPillAccent(void) {
+    return source_colours_enabled ? pack_rgba(Theme_getAccent(active_source)) : 0;
+}
+
+bool Theme_beginAccentPills(void) {
+    if (!source_colours_enabled) return false;
+    saved_platform_accent = CFG_getColor(COLOR_ACCENT);
+    CFG_setColor(COLOR_ACCENT, Theme_getPillAccent());
+    GFX_updateColors();
+    return true;
+}
+
+void Theme_endAccentPills(void) {
+    CFG_setColor(COLOR_ACCENT, saved_platform_accent);
+    GFX_updateColors();
+}
+
 uint32_t Theme_getPackedColor(ThemeRole role, bool selected) {
 #ifdef DEBUG
     assert(theme_initialized);

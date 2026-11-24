@@ -62,6 +62,25 @@ SDL_Color Theme_getAccent(ThemeSource source);
 // unknown source gives the neutral one.
 SDL_Color Theme_getDeep(ThemeSource source);
 
+// The platform draws the pills of the status group and of the button hints with
+// the accent colour of the NextUI theme, and reads it from its configuration.
+// These functions replace it by the accent of a source around that drawing.
+//
+// The stack of pages sets the active source before each layout: enabled is the
+// "Source colours" setting, and source is the source of the top page.
+void Theme_setSourceColours(bool enabled, ThemeSource source);
+
+// The accent of the active source, packed as 0xRRGGBBAA, or 0 while source
+// colours are off. A view that draws a pill renders again when it changes.
+uint32_t Theme_getPillAccent(void);
+
+// Put the accent of the active source in the pill colour of the platform, for
+// the draw calls between the two functions. The first returns false and changes
+// nothing where source colours are off; call the second only after a true.
+// See the AccentPills class for the C++ form.
+bool Theme_beginAccentPills(void);
+void Theme_endAccentPills(void);
+
 // Resolve each role from the active NextUI theme.
 // Must be called after GFX_init().
 void Theme_init(SDL_Surface* screen);
