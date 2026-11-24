@@ -1,6 +1,7 @@
 #include "ui/page/page_stack.hpp"
 
 #include <cstdio>
+#include <optional>
 #include <utility>
 
 #include "input/input_state.hpp"
@@ -105,10 +106,19 @@ void PageStack::layout(UiCompositor& compositor) {
         takeSnapshot(compositor);
     }
 
-    PageEntry& top        = entries.back();
-    UiLayoutContext& root = compositor.beginLayout(*top.context);
+    PageEntry& top            = entries.back();
+    const bool hadBackground = backgroundShown;
+    UiLayoutContext& root     = compositor.beginLayout(*top.context);
     top.context->startLayout();
-    if (dialogOnTop) root.layoutChild(snapshot, root.getMaxRect());
+    if (dialogOnTop) {
+        root.layoutChild(snapshot, root.getMaxRect());
+        // A dialog puts the whole frame on the surface, and the compositor cleared the layers
+        backgroundShown = false;
+    } else {
+        layoutBackground(root, *top.page);
+        // The layer shows the flat color again, and the compositor clears it
+        if (backgroundShown != hadBackground) compositor.invalidateAll();
+    }
     top.page->layout(root);
     top.context->finishLayout();
 
@@ -120,6 +130,15 @@ void PageStack::layout(UiCompositor& compositor) {
     top.context->updateActiveOwners(owners);
 }
 
+void PageStack::layoutBackground(UiLayoutContext& root, const UiPageImplBase& page) {
+    std::optional<SourcePalette> palette;
+    if (backgroundPalette) palette = backgroundPalette(page.getSource());
+    backgroundShown = palette.has_value();
+    if (!palette) return;
+    background.setPalette(*palette);
+    root.layoutChild(background, root.getMaxRect());
+}
+
 void PageStack::takeSnapshot(UiCompositor& compositor) {
     snapshotStale = false;
     // A dialog cannot open a page, thus only the bottom page can have no page under it
@@ -128,7 +147,10 @@ void PageStack::takeSnapshot(UiCompositor& compositor) {
         return;
     }
     PageEntry& under = entries[entries.size() - 2];
-    under.page->layout(compositor.beginLayout(*under.context));
+    UiLayoutContext& underRoot = compositor.beginLayout(*under.context);
+    // The snapshot is a picture of the whole screen, thus it holds the background
+    layoutBackground(underRoot, *under.page);
+    under.page->layout(underRoot);
     snapshot.setImage(compositor.drawSnapshot(), dimColor);
 }
 

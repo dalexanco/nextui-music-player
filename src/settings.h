@@ -37,6 +37,8 @@ typedef enum {
 
 extern const IntSetting   SETTING_SCREEN_OFF_TIMEOUT;
 extern const BoolSetting  SETTING_LYRICS_ENABLED;
+// The look with a colour for each source: the background and the pills. Off by default.
+extern const BoolSetting  SETTING_SOURCE_COLOURS;
 extern const IntSetting   SETTING_BASS_FILTER_HZ;
 extern const IntSetting   SETTING_SOFT_LIMITER;
 extern const EnumSetting  SETTING_UPDATE_CHANNEL;

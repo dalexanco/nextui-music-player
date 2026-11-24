@@ -1,9 +1,11 @@
 #include <functional>
+#include <optional>
 
 #include "input/input_driver.hpp"
 #include "input/input_state.hpp"
 #include "module_common.h"
 #include "pad_reset.h"
+#include "settings.h"
 #include "toast.h"
 #include "ui/controls_help_page.hpp"
 #include "ui/page/legacy_module_page.hpp"
@@ -147,6 +149,10 @@ void PageStack::run(const UiPage& page, DisplayContext* display) {
     UiCompositor compositor;
     PageStack stack(playback);
     stack.setDimColor(getDimColor());
+    stack.setBackgroundPalette([](ThemeSource source) -> std::optional<SourcePalette> {
+        if (!Settings_getBool(&SETTING_SOURCE_COLOURS)) return std::nullopt;
+        return SourcePalette{Theme_getAccent(source), Theme_getDeep(source)};
+    });
     // A screen-bound toast belongs to the screen that showed it
     stack.setScreenChangeCallback(Toast_screenChanged);
     stack.setDialogOpeners([&stack](HelpId helpId) { stack.open(ControlsHelpPage(helpId)); },

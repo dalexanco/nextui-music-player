@@ -82,6 +82,7 @@ struct TestPage final : public UiPage {
     std::string name;
     PageKind kind = PageKind::FullScreen;
     HelpId helpId = HELP_NONE;
+    ThemeSource source = THEME_SOURCE_NEUTRAL;
     /** The premultiplied ARGB color of the root view, or 0 for a view with no pixels */
     uint32_t color = 0;
     /** Called with the implementation at each short press that the page gets */
@@ -106,6 +107,7 @@ public:
         : UiPageImpl<Page>(page.kind), page(page), root(page.name, page.color) {}
 
     HelpId getHelpId() const override { return page.helpId; }
+    ThemeSource getSource() const override { return page.source; }
     void onEnter() override {
         add("enter");
         if (page.onEnterHook) page.onEnterHook(*this);
@@ -712,6 +714,41 @@ TEST(legacy_module_leaves_no_pixels_on_the_layers) {
     CHECK(!f.host.quitRequested);
 }
 
+// The palette function gives the background of a page from its source. The background goes on
+// the layer under the surface, and an empty palette takes it away.
+TEST(background_follows_the_source_of_the_top_page_and_the_palette_function) {
+    LegacyFixture f;
+    std::vector<ThemeSource> asked;
+    bool enabled = true;
+    f.stack.setBackgroundPalette([&](ThemeSource source) -> std::optional<SourcePalette> {
+        asked.push_back(source);
+        if (!enabled) return std::nullopt;
+        return SourcePalette{SDL_Color{200, 30, 90, 255}, SDL_Color{60, 10, 30, 255}};
+    });
+    layerHasPixels[UI_LAYER_BACKGROUND] = false;
+    f.drawFrame();
+    CHECK(layerHasPixels[UI_LAYER_BACKGROUND]);
+    CHECK(!asked.empty() && asked.back() == THEME_SOURCE_NEUTRAL);
+
+    PlainPage music = makePage("music");
+    music.source    = THEME_SOURCE_MUSIC;
+    f.stack.open(music);
+    f.stack.endFrame();
+    f.drawFrame();
+    CHECK(asked.back() == THEME_SOURCE_MUSIC);
+
+    enabled = false;
+    f.drawFrame();
+    CHECK(!layerHasPixels[UI_LAYER_BACKGROUND]);
+}
+
+TEST(no_palette_function_leaves_the_background_layer_alone) {
+    LegacyFixture f;
+    layerHasPixels[UI_LAYER_BACKGROUND] = false;
+    f.drawFrame();
+    CHECK(!layerHasPixels[UI_LAYER_BACKGROUND]);
+}
+
 // A module that quits with no quit flag, as Settings does at a self-update restart
 TEST(legacy_module_that_quits_requests_the_quit) {
     LegacyFixture f;
@@ -1035,6 +1072,8 @@ int main(void) {
     RUN(covered_page_shows_dimmed_under_a_dialog);
     RUN(legacy_module_takes_the_screen_again_at_the_same_address);
     RUN(legacy_module_leaves_no_pixels_on_the_layers);
+    RUN(background_follows_the_source_of_the_top_page_and_the_palette_function);
+    RUN(no_palette_function_leaves_the_background_layer_alone);
     RUN(legacy_module_that_quits_requests_the_quit);
     RUN(legacy_module_gives_its_typed_result_before_the_page_under_resumes);
     RUN(legacy_page_with_no_result_gets_its_callback);

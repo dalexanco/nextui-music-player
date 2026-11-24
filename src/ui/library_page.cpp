@@ -68,6 +68,7 @@ public:
     }
 
     HelpId getHelpId() const override { return HELP_LIBRARY_MENU; }
+    ThemeSource getSource() const override { return THEME_SOURCE_MUSIC; }
 
     void onEnter() override {
         screenView.setAdapter(rows);

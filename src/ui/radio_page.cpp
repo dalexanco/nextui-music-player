@@ -94,6 +94,7 @@ public:
     }
 
     HelpId getHelpId() const override { return HELP_RADIO_LIST; }
+    ThemeSource getSource() const override { return THEME_SOURCE_RADIO; }
 
     void onEnter() override {
         if (Radio_init() != 0) {

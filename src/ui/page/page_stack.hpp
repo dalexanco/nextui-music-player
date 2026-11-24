@@ -13,6 +13,7 @@
 #include "ui/page/activity_clock.hpp"
 #include "ui/page/page_context.hpp"
 #include "ui/page/ui_page.hpp"
+#include "ui/view/background_view.hpp"
 #include "ui/view/snapshot_view.hpp"
 #include "ui/view/ui_compositor.hpp"
 
@@ -47,6 +48,15 @@ public:
      * screen changes. A dialog does not change the screen.
      */
     void setScreenChangeCallback(std::function<void()> callback) { onScreenChange = std::move(callback); }
+
+    /**
+     * Sets the function that gives the palette of the background of a page from its source, or
+     * an empty value for a flat background that the display clears. Without a function, no page
+     * has a background view. The stack asks it at each layout.
+     */
+    void setBackgroundPalette(std::function<std::optional<SourcePalette>(ThemeSource)> palette) {
+        backgroundPalette = std::move(palette);
+    }
 
     /** Puts `page` at the bottom, and gives it its context and onEnter(). */
     void start(std::unique_ptr<UiPageImplBase> page, const UiScreenInfo& screen);
@@ -154,6 +164,9 @@ private:
         std::unique_ptr<UiPageImplBase> page;
     };
 
+    /** Lays out the background of `page` under its views, or no background when the palette is empty. */
+    void layoutBackground(UiLayoutContext& root, const UiPageImplBase& page);
+
     /** Takes the snapshot of the page under the top dialog. */
     void takeSnapshot(UiCompositor& compositor);
 
@@ -173,6 +186,10 @@ private:
     std::function<void()> onScreenChange;
     uint32_t frameTime = 0;
     SnapshotView snapshot;
+    BackgroundView background;
+    std::function<std::optional<SourcePalette>(ThemeSource)> backgroundPalette;
+    /** The last layout had the background view, thus its layer holds an image */
+    bool backgroundShown = false;
     /** The snapshot does not show the page under the top dialog */
     bool snapshotStale = true;
     SDL_Color dimColor{};

@@ -100,6 +100,7 @@ TESTS   += $(BIN)/test_page_context
 TESTS   += $(BIN)/test_activity_clock
 TESTS   += $(BIN)/test_page_stack
 TESTS   += $(BIN)/test_ui_compositor
+TESTS   += $(BIN)/test_source_gradient
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -226,7 +227,8 @@ $(BIN)/test_activity_clock: test_activity_clock.cpp $(SRC)/ui/page/activity_cloc
 
 PAGE_STACK_SRC = $(SRC)/ui/page/page_stack.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/page/legacy_module_page.cpp $(INPUT_EVENTS_SRC) \
                  $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
-                 $(SRC)/ui/view/ui_compositor.cpp $(SRC)/ui/view/snapshot_view.cpp
+                 $(SRC)/ui/view/ui_compositor.cpp $(SRC)/ui/view/snapshot_view.cpp \
+                 $(SRC)/ui/view/background_view.cpp $(SRC)/ui/view/source_gradient.cpp
 
 $(BIN)/test_page_stack: test_page_stack.cpp $(PAGE_STACK_SRC) $(SRC)/ui/page/page_stack.hpp \
                         $(SRC)/ui/page/ui_page.hpp $(SRC)/ui/page/legacy_module_page.hpp \
@@ -241,6 +243,10 @@ $(BIN)/test_ui_compositor: test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) $(SRC)/ui
                            $(SRC)/ui/view/ui_layout_context.hpp $(SRC)/ui/view/ui_compositor.hpp $(SRC)/ui_layers.h test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) \
 	  $(shell pkg-config --libs sdl2)
+
+$(BIN)/test_source_gradient: test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp \
+                            $(SRC)/ui/view/source_gradient.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp
 
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c
