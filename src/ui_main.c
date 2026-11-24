@@ -144,20 +144,13 @@ static const ControlHelp radio_manage_controls[] = {
     {NULL, NULL}
 };
 
-// Radio browse stations controls - station list (A/B shown in footer)
+// Radio add stations controls (B shown in footer)
 static const ControlHelp radio_browse_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"A", "Add/Remove Station"},
-    {"Y", "Manual Setup Help"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// Radio manual help controls (B shown in footer)
-static const ControlHelp radio_help_controls[] = {
-    {"Up/Down", "Scroll"},
-    {"B", "Back"},
+    {"A", "Add Station / Search"},
+    {"Y", "Keyboard"},
+    {"X", "Next Country"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -341,11 +334,7 @@ const ControlHelp* get_controls_help(HelpId help_id, const char** title) {
             break;
         case HELP_RADIO_BROWSE:
             controls = radio_browse_controls;
-            page_title = "Browse Stations";
-            break;
-        case HELP_RADIO_HELP:
-            controls = radio_help_controls;
-            page_title = "Radio Help";
+            page_title = "Add Stations";
             break;
         case HELP_PODCAST_MENU:
             controls = podcast_menu_controls;

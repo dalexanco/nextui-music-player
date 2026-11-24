@@ -11,7 +11,7 @@
 #include "toast.h"
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
-#include "ui/radio_browse_page.hpp"
+#include "ui/radio_search_page.hpp"
 #include "ui/radio_options_page.hpp"
 #include "ui/radio_playing_page.hpp"
 #include "ui/radio_station_panel.hpp"
@@ -209,7 +209,7 @@ private:
     }
 
     void addStations() {
-        getNavigator().openForResult(RadioBrowsePage{}, [this](const std::monostate&) { reloadKeepingCursor(); });
+        getNavigator().openForResult(RadioSearchPage{}, [this](const std::monostate&) { reloadKeepingCursor(); });
     }
 
     /** Reads the stations again. The cursor keeps its position, or goes to the last row. */

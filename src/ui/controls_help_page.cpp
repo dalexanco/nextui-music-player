@@ -102,7 +102,6 @@ ThemeSource getHelpSource(HelpId helpId) {
         case HELP_RADIO_PLAYING:
         case HELP_RADIO_MANAGE:
         case HELP_RADIO_BROWSE:
-        case HELP_RADIO_HELP:               return THEME_SOURCE_RADIO;
         case HELP_PODCAST_MENU:
         case HELP_PODCAST_MANAGE:
         case HELP_PODCAST_TOP_SHOWS:
