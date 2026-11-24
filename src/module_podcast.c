@@ -3,6 +3,7 @@
 #include "module_common.h"
 #include "module_podcast.h"
 #include "podcast.h"
+#include "podcast_import.h"
 #include "podcast_sleep.h"
 #include "player.h"
 #include "background.h"
@@ -15,9 +16,17 @@
 #define PROGRESS_SAVE_INTERVAL_MS 30000  // 30 seconds
 
 void PodcastModule_autoRefresh(void) {
+    // The folder of the files that import podcasts exists once the user looks at the podcasts
+    PodcastImport_prepareFolder();
+
     // Auto-check for new episodes once per app session
     static bool auto_refreshed = false;
-    if (!auto_refreshed && Wifi_isConnected() && Podcast_getSubscriptionCount() > 0) {
+    if (!Wifi_isConnected()) return;
+
+    // Files that the user dropped on the card come first: the import ends with a refresh of its own
+    if (PodcastImport_start(false) == 0) return;
+
+    if (!auto_refreshed && Podcast_getSubscriptionCount() > 0) {
         Podcast_startRefreshAll();
         auto_refreshed = true;
     }
