@@ -102,6 +102,7 @@ TESTS   += $(BIN)/test_page_stack
 TESTS   += $(BIN)/test_ui_compositor
 TESTS   += $(BIN)/test_source_gradient
 TESTS   += $(BIN)/test_detail_panel_layout
+TESTS   += $(BIN)/test_browser_nav
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -254,6 +255,9 @@ $(BIN)/test_detail_panel_layout: test_detail_panel_layout.cpp $(SRC)/ui/view/det
                                  $(SRC)/ui/view/source_gradient.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_detail_panel_layout.cpp $(SRC)/ui/view/detail_panel_layout.cpp \
 	  $(SRC)/ui/view/source_gradient.cpp
+
+$(BIN)/test_browser_nav: test_browser_nav.cpp $(SRC)/browser_nav.cpp $(SRC)/browser_nav.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_browser_nav.cpp $(SRC)/browser_nav.cpp
 
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c

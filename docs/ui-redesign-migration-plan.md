@@ -127,6 +127,7 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 - Files: `file_browser_page.cpp`, `browser.c` kept as logic. Validation: audit screens 04–06, 15.
 - Risk: the biggest behaviour surface of Music (selection memory, multi-select for playlists). Extract the
   navigation state into a testable class first (own commit).
+- **Status 1.4a: done** — `BrowserNav` (`src/browser_nav.*`, history of the cursor per folder and the choice of the row after a way up), tested by `test_browser_nav` (host, 11 tests pass).
 
 **1.5 Queue (X)** — new native sub-list page [`tpl-sousliste`], reached from the player. First use of the shared
 `SubListPage` (title + kind, full-width rows, playing indicator).
