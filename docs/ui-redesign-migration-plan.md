@@ -121,6 +121,7 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 **1.3 Playlists** — wrap-free native page replacing `ui_playlist.c` (130 lines, the smallest legacy module).
 - Files: new `ui/playlists_page` rewrite, `module_playlist.c` kept as logic only. Board: `tpl-liste`.
 - Validation: audit screens 16–19.
+- **Status: done (built, not validated on device)** — `PlaylistsPage` (list + panel, Y new, X delete) and the new `PlaylistTracksPage` (A plays through `NowPlayingPage`, X removes) are native; `module_playlist.*` and `ui_playlist.*` are deleted (no logic was left in them: it all lived in the module loop). New reusable pieces: `TextInputPage` (on-screen keyboard as a legacy page with a `std::string` result), `ListRowView::setIcon()` + `IconView` (format icons in rows).
 
 **1.4 File browser** — native list page replacing `ui_music.c`; directory rows and audio rows; panel shows tags + art.
 - Files: `file_browser_page.cpp`, `browser.c` kept as logic. Validation: audit screens 04–06, 15.

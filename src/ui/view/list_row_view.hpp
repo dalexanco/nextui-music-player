@@ -7,6 +7,7 @@
 
 #include <SDL2/SDL_ttf.h>
 
+#include "ui/view/icon_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/list_item_view.hpp"
 
@@ -37,6 +38,12 @@ public:
      * Without source colours the row leaves the color that the owner gave.
      */
     void setRightText(std::shared_ptr<TextView> text);
+    /**
+     * Shows an icon at the left edge of the row, before the text. `normalIcon` shows while the row is
+     * not selected and `selectedIcon` while it is. The icon cache keeps the surfaces. Null for both
+     * removes the icon.
+     */
+    void setIcon(SDL_Surface* normalIcon, SDL_Surface* selectedIcon);
     bool isSelected() const { return selected; }
 
     /** The text moves again each time the row shows it, until stopScrolling(). */
@@ -58,6 +65,8 @@ private:
     TextView shortText;
     TextView longText;
     std::shared_ptr<UiView> rightView;
+    /** The icon at the left edge, or null */
+    std::shared_ptr<IconView> iconView;
     /** The right view when it is a text that the row colors, or null */
     std::shared_ptr<TextView> rightText;
     /** The row changed the color of the right text, thus it must give it back */

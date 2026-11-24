@@ -26,10 +26,25 @@ void ListRowView::setSelected(bool newSelected) {
     selected = newSelected;
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
+    if (iconView) iconView->setSelected(selected);
     if (!selected) {
         stopScrolling();
         resetScrolling();
     }
+    dirty = true;
+}
+
+void ListRowView::setIcon(SDL_Surface* normalIcon, SDL_Surface* selectedIcon) {
+    if (!normalIcon && !selectedIcon) {
+        iconView.reset();
+        dirty = true;
+        return;
+    }
+    if (!iconView) {
+        iconView = std::make_shared<IconView>();
+        iconView->setSelected(selected);
+    }
+    iconView->setSurfaces(normalIcon, selectedIcon);
     dirty = true;
 }
 
@@ -63,6 +78,12 @@ void ListRowView::layout(UiLayoutContext& context) {
     const int padding = SCALE1(BUTTON_PADDING);
     SDL_Rect textRect = {padding, 0, size.w - padding * 2, size.h};
 
+    // The icon takes the left of the text, and the pill grows with it
+    const int iconSize   = iconView ? SCALE1(24) : 0;
+    const int iconOffset = iconView ? iconSize + SCALE1(6) : 0;
+    textRect.x += iconOffset;
+    textRect.w -= iconOffset;
+
     UiLayoutContext measuring = context.createMeasuringContext();
     SDL_Rect rightRect{};
     if (rightView) {
@@ -86,8 +107,8 @@ void ListRowView::layout(UiLayoutContext& context) {
     context.setSize(size);
 
     // A text that does not fit takes all of its space, and the pill with it
-    const int textSpace    = textRect.w + padding * 2;
-    int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2);
+    const int textSpace    = textRect.w + padding * 2 + iconOffset;
+    int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2 + iconOffset);
     // The extended pill takes the whole row, thus the right view is on it and no band shows
     if (extendedPill) newPillWidth = size.w;
     const int newBandWidth = rightView && !extendedPill ? size.w : 0;
@@ -98,6 +119,7 @@ void ListRowView::layout(UiLayoutContext& context) {
         dirty      = true;
     }
     context.layoutChild(shown, textRect);
+    if (iconView) context.layoutChild(*iconView, SDL_Rect{padding, (size.h - iconSize) / 2, iconSize, iconSize});
     if (rightView) context.layoutChild(*rightView, rightRect);
 }
 
