@@ -100,8 +100,11 @@ void Icons_init(void) {
     }
 }
 
+static void free_variants(void);
+
 // Cleanup icons
 void Icons_quit(void) {
+    free_variants();
     if (icons.folder) { SDL_FreeSurface(icons.folder); icons.folder = NULL; }
     if (icons.audio) { SDL_FreeSurface(icons.audio); icons.audio = NULL; }
     if (icons.play_all) { SDL_FreeSurface(icons.play_all); icons.play_all = NULL; }
@@ -123,12 +126,49 @@ bool Icons_isLoaded(void) {
     return icons.loaded;
 }
 
+// A row holds the normal and the selected icon at the same time, and each has its own color. The
+// color of a surface is a property of the surface, thus each (icon, role, selected) has its own copy:
+// with one shared surface the last color set would win for both, and the folders of the unselected
+// rows would take the color of the selected one.
+#define ICON_VARIANT_MAX 64
+
+typedef struct {
+    SDL_Surface* base;
+    ThemeRole role;
+    bool selected;
+    SDL_Surface* tinted;
+} IconVariant;
+
+static IconVariant variants[ICON_VARIANT_MAX];
+static int variant_count = 0;
+
+static void free_variants(void) {
+    for (int i = 0; i < variant_count; i++) SDL_FreeSurface(variants[i].tinted);
+    variant_count = 0;
+}
+
 static SDL_Surface* color_icon(SDL_Surface* icon, ThemeRole role, bool selected) {
     if (!icons.loaded || !icon) return NULL;
 
     SDL_Color color = Theme_getColor(role, selected);
-    SDL_SetSurfaceColorMod(icon, color.r, color.g, color.b);
-    return icon;
+    for (int i = 0; i < variant_count; i++) {
+        IconVariant* variant = &variants[i];
+        if (variant->base != icon || variant->role != role || variant->selected != selected) continue;
+        SDL_SetSurfaceColorMod(variant->tinted, color.r, color.g, color.b);
+        return variant->tinted;
+    }
+    if (variant_count >= ICON_VARIANT_MAX) {
+        SDL_SetSurfaceColorMod(icon, color.r, color.g, color.b);
+        return icon;
+    }
+    SDL_Surface* copy = SDL_DuplicateSurface(icon);
+    if (!copy) {
+        SDL_SetSurfaceColorMod(icon, color.r, color.g, color.b);
+        return icon;
+    }
+    SDL_SetSurfaceColorMod(copy, color.r, color.g, color.b);
+    variants[variant_count++] = (IconVariant){icon, role, selected, copy};
+    return copy;
 }
 
 SDL_Surface* Icons_getFolder(ThemeRole role, bool selected) {

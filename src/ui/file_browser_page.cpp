@@ -148,7 +148,7 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        screenView.setSidePanel(Theme_isSourceColoursEnabled() && panelShown ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 
@@ -199,31 +199,23 @@ private:
                           {{"Add to playlist", [this] { addToPlaylist(); }}, {"Delete file", [this] { confirmDelete(); }}});
     }
 
-    /** Fills the detail panel: a tile with the name of the row, where it is, and its place in the folder */
+    /**
+     * Fills the detail panel of an audio file: its name, the folder, and its place among the tracks of
+     * the folder. A folder, "..", and Play All have no panel: there is nothing to show of them.
+     */
     void updatePanel(int index) {
         const FileEntry* entry = rows.get(index);
-        if (!entry) return;
+        panelShown             = entry && !entry->is_dir && !entry->is_play_all;
+        if (!panelShown) return;
         char name[256];
-        if (entry->is_dir || entry->is_play_all) {
-            std::snprintf(name, sizeof(name), "%s", entry->name);
-        } else {
-            get_file_display_name(entry->name, name, sizeof(name));
+        get_file_display_name(entry->name, name, sizeof(name));
+        panel.getArt().setFallback(THEME_SOURCE_MUSIC);
+        panel.getInfo().setLine(name);
+        int track = 0;
+        for (int row = 0; row <= index; row++) {
+            if (!rows.get(row)->is_dir && !rows.get(row)->is_play_all) track++;
         }
-        panel.getArt().setFallback(name, THEME_SOURCE_MUSIC);
-        if (entry->is_dir) {
-            panel.getInfo().setLine(isParentRow(*entry) ? "Parent folder" : "Folder");
-            panel.getInfo().setPosition("Row " + std::to_string(index + 1) + " of " + std::to_string(rows.getCount()));
-        } else if (entry->is_play_all) {
-            panel.getInfo().setLine("Play every track below");
-            panel.getInfo().setPosition(std::to_string(browser().audio_count) + " tracks here");
-        } else {
-            panel.getInfo().setLine(getFolderName());
-            int track = 0;
-            for (int row = 0; row <= index; row++) {
-                if (!rows.get(row)->is_dir && !rows.get(row)->is_play_all) track++;
-            }
-            panel.getInfo().setPosition("Track " + std::to_string(track) + " of " + std::to_string(browser().audio_count));
-        }
+        panel.getInfo().setPosition("Track " + std::to_string(track) + " of " + std::to_string(browser().audio_count) + " in " + getFolderName());
     }
 
     /** Returns the name of the folder that the browser shows, or "Music" for the root. */
@@ -345,6 +337,7 @@ private:
     }
 
     BrowserListAdapter rows;
+    bool panelShown = false;
     BrowserNav nav;
     ListScreenView screenView{Fonts_getLarge()};
     EmptyStateView emptyState;
