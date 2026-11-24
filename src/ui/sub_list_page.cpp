@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "ui/sub_list_page.hpp"
 
 #include <memory>
@@ -277,8 +278,12 @@ private:
         const char** rightHints = rightBuffers[flip];
         size_t left = 0;
         size_t right = 0;
-        leftHints[left++]  = "START";
-        leftHints[left++]  = "CONTROLS";
+        // The bar holds two pairs on each side: a key on the left takes the place of START
+        const bool leftKey = std::any_of(keys.begin(), keys.end(), [](const SubListKey& key) { return key.left; });
+        if (!leftKey) {
+            leftHints[left++] = "START";
+            leftHints[left++] = "CONTROLS";
+        }
         rightHints[right++] = "B";
         rightHints[right++] = "BACK";
         for (const SubListKey& key : keys) {
