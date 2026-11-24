@@ -11,11 +11,16 @@ class NowPlayingPageImpl final : public LegacyModulePageImpl<NowPlayingPage> {
 protected:
     ModuleExitReason runModule(DisplayContext* display) override {
         switch (Background_getActive()) {
-            case BG_MUSIC:   return MusicPlayingModule_run(display, nullptr);
+            case BG_MUSIC:   return MusicPlayingModule_run(display, &queueEnded);
             case BG_PODCAST: return PodcastModule_run(display);
             default:         return MODULE_EXIT_TO_MENU;
         }
     }
+
+    bool getModuleResult() override { return queueEnded; }
+
+private:
+    bool queueEnded = false;
 };
 
 }  // namespace
