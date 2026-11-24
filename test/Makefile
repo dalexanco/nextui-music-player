@@ -31,10 +31,6 @@
 # where its marquee is, with the clock and the measured widths passed in and the
 # paint left in ui_utils.c.
 #
-# podcast_episode_layout.c is integer geometry, as list_nav.c is: the summary
-# height, the viewport and the rows come in, and the scroll comes out. Its test
-# links list_nav.c for the wrap of the cursor.
-#
 # frame_state.c is the record of what a frame changed: two flags in, and the
 # presentation that the frame needs out. The calls of the platform stay in
 # module_common.c.
@@ -83,7 +79,7 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
            $(BIN)/test_stopwatch $(BIN)/test_error \
-           $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
+           $(BIN)/test_frame_state \
            $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings \
            $(BIN)/test_seek_scan $(BIN)/test_mp3_seek
 TESTS   += $(BIN)/test_id3
@@ -304,10 +300,6 @@ $(BIN)/test_error: test_error.cpp $(SRC)/error.cpp $(SRC)/error.h $(BIN)/obj/utf
 
 $(BIN)/test_screen_title: test_screen_title.c $(SRC)/screen_title.c $(SRC)/screen_title.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_screen_title.c $(SRC)/screen_title.c
-
-$(BIN)/test_podcast_episode_layout: test_podcast_episode_layout.c $(SRC)/podcast_episode_layout.c \
-                                    $(SRC)/podcast_episode_layout.h $(SRC)/list_nav.c test.h | $(BIN)
-	$(CC) $(CFLAGS) $(INC) -o $@ test_podcast_episode_layout.c $(SRC)/podcast_episode_layout.c $(SRC)/list_nav.c
 
 $(BIN)/test_frame_state: test_frame_state.c $(SRC)/frame_state.c $(SRC)/frame_state.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_frame_state.c $(SRC)/frame_state.c

@@ -14,7 +14,7 @@
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/podcast_episodes_page.hpp"
-#include "ui/podcast_legacy_page.hpp"
+#include "ui/podcast_manage_page.hpp"
 #include "ui/podcast_playing_page.hpp"
 #include "ui/podcast_queue_page.hpp"
 #include "ui/podcast_show_panel.hpp"
@@ -205,7 +205,7 @@ public:
             return true;
         }
         if (event.isSingleButton(Button::Y)) {
-            getNavigator().open(PodcastLegacyPage{});
+            getNavigator().open(PodcastManagePage{});
             return true;
         }
         return false;

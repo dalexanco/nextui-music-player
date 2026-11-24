@@ -19,7 +19,6 @@
 #include "api.h"
 #include "debug.h"
 #include "wifi.h"
-#include "ui_podcast.h"
 #include "module_common.h"
 #include <sys/statvfs.h>
 
@@ -689,9 +688,6 @@ void Podcast_cleanup(void) {
 
     // Save progress
     Podcast_flushProgress();
-
-    // Clear UI caches
-    Podcast_clearThumbnailCache();
 
     // Allow full re-initialization on next entry (including auto-resume of downloads)
     podcast_initialized = false;

@@ -8,8 +8,7 @@
 
 /**
  * The Podcasts row of Main: the episodes to continue, the subscriptions with a detail panel in the
- * new look, and the downloads while there are some. A opens, X unsubscribes, Y manages. The
- * screens that follow still run the legacy module (`PodcastLegacyPage`) until their own step.
+ * new look, and the downloads while there are some. A opens, X unsubscribes, Y manages.
  */
 class PodcastPage final : public UiPage {
 public:

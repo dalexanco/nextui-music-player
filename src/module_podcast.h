@@ -5,18 +5,13 @@
 extern "C" {
 #endif
 
-#include <SDL2/SDL.h>
 #include <stdbool.h>
 
-#include "display_helper.h"
-#include "module_common.h"
+// The playback of the podcasts, shared by the player page and the background. The screens are the
+// native pages of ui/podcast_*.
 
 // Starts the refresh of every subscription, once for each session of the app, with a network
 void PodcastModule_autoRefresh(void);
-
-// Run the podcast module
-// Handles: search, top shows, the download queue
-ModuleExitReason PodcastModule_run(DisplayContext* display);
 
 // Check if podcast module is active (playing)
 bool PodcastModule_isActive(void);
