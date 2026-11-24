@@ -28,10 +28,12 @@ namespace {
 constexpr const char* kLeftHints[]            = {"START", "CONTROLS", nullptr};
 constexpr const char* kSearchSubscribe[]      = {"B", "BACK", "A", "SUBSCRIBE", nullptr};
 constexpr const char* kSearchUnsubscribe[]    = {"B", "BACK", "A", "UNSUBSCRIBE", nullptr};
-constexpr const char* kTopSubscribe[]         = {"B", "BACK", "X", "REFRESH", "A", "SUBSCRIBE", nullptr};
-constexpr const char* kTopUnsubscribe[]       = {"B", "BACK", "X", "REFRESH", "A", "UNSUBSCRIBE", nullptr};
+// The top shows have one action besides A and B (refresh): the third, at the left in place of START
+constexpr const char* kTopLeftHints[]         = {"X", "REFRESH", nullptr};
+constexpr const char* kTopSubscribe[]         = {"B", "BACK", "A", "SUBSCRIBE", nullptr};
+constexpr const char* kTopUnsubscribe[]       = {"B", "BACK", "A", "UNSUBSCRIBE", nullptr};
 constexpr const char* kBackOnly[]             = {"B", "BACK", nullptr};
-constexpr const char* kTopBackOnly[]          = {"B", "BACK", "X", "REFRESH", nullptr};
+constexpr const char* kTopBackOnly[]          = {"B", "BACK", nullptr};
 
 /** The frames that the page waits after it says that it subscribes, thus the words reach the screen */
 constexpr int kSubscribeWaitFrames = 2;
@@ -251,7 +253,7 @@ private:
         } else {
             right = top ? kTopSubscribe : kSearchSubscribe;
         }
-        screenView.getButtonHintsView().setHints(kLeftHints, right);
+        screenView.getButtonHintsView().setHints(top ? kTopLeftHints : kLeftHints, right);
     }
 
     void updatePanel(int index) {

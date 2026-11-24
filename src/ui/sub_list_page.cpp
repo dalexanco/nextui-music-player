@@ -1,11 +1,13 @@
-#include <algorithm>
 #include "ui/sub_list_page.hpp"
+
+#include <algorithm>
 
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "ui/choice_options_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/empty_state_view.hpp"
 #include "ui/view/list_adapter.hpp"
@@ -170,6 +172,8 @@ public:
     SubListPageImpl(std::string title, std::string kind, std::string verb, ThemeSource source,
                     std::shared_ptr<SubListSource> rows, HelpId helpId)
         : UiPageImpl(PageKind::FullScreen), source(source), helpId(helpId), rows(std::move(rows)) {
+        titleText = title;
+        kindText  = kind;
         screenView.getTitleView().setText(title);
         screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
         kindView.setText(kind);
@@ -231,9 +235,12 @@ public:
             close();
             return true;
         }
-        for (const SubListKey& key : keys) {
-            if (!event.isSingleButton(key.button)) continue;
-            rows.getSource().onKey(key.button, list.getSelectedIndex(), getNavigator());
+        if (keys.size() >= 2 && event.isSingleButton(Button::Y)) {
+            openOptions();
+            return true;
+        }
+        if (keys.size() == 1 && event.isSingleButton(keys[0].button)) {
+            rows.getSource().onKey(keys[0].button, list.getSelectedIndex(), getNavigator());
             reload();
             return true;
         }
@@ -264,40 +271,57 @@ private:
         updateHints();
     }
 
-    /** Puts the hints: the label of A follows the row, and the keys of the source come with it. */
+    /** Y OPTIONS: the actions of the source that do not fit in the bar. */
+    void openOptions() {
+        const int index = list.getSelectedIndex();
+        std::vector<std::string> labels;
+        for (const SubListKey& key : keys) labels.push_back(rows.getSource().getKeyLabel(key, index));
+        // The panel is about the row under the cursor
+        const std::string rowText = index >= 0 ? rows.getSource().getRowText(index) : titleText;
+        getNavigator().openForResult(
+            ChoiceOptionsPage(source, kindText, titleText, rowText, labels), [this, index](const ChoiceResult& result) {
+                if (result.index < 0 || result.index >= static_cast<int>(keys.size())) return;
+                rows.getSource().onKey(keys[static_cast<size_t>(result.index)].button, index, getNavigator());
+                reload();
+            });
+    }
+
+    /**
+     * Puts the hints: A with the label of the row, B, and one more action at most. With several
+     * keys the third is `Y OPTIONS`; with one key it is that key; with none, START CONTROLS stays.
+     * An empty list has nothing for A.
+     */
     void updateHints() {
         const int index         = list.getSelectedIndex();
         const std::string label = index >= 0 ? rows.getSource().getVerb(index) : std::string();
         hintLabel               = label.empty() ? verb : label;
-        if (hintLabel == shownLabel && hintsBuilt) return;
+        const bool empty        = list.getItemCount() == 0;
+        if (hintLabel == shownLabel && hintsBuilt && empty == shownEmpty) return;
         hintsBuilt = true;
         shownLabel = hintLabel;
+        shownEmpty = empty;
         // The view compares the arrays by address, thus each change goes to the other one
         flip = 1 - flip;
         const char** leftHints  = leftBuffers[flip];
         const char** rightHints = rightBuffers[flip];
-        size_t left = 0;
+        size_t left  = 0;
         size_t right = 0;
-        // The bar holds two pairs on each side: a key on the left takes the place of START
-        const bool leftKey = std::any_of(keys.begin(), keys.end(), [](const SubListKey& key) { return key.left; });
-        if (!leftKey) {
+        if (keys.size() >= 2) {
+            leftHints[left++] = "Y";
+            leftHints[left++] = "OPTIONS";
+        } else if (keys.size() == 1) {
+            leftHints[left++] = keys[0].button == Button::X ? "X" : "Y";
+            leftHints[left++] = keys[0].label.c_str();
+        } else {
             leftHints[left++] = "START";
             leftHints[left++] = "CONTROLS";
         }
         rightHints[right++] = "B";
         rightHints[right++] = "BACK";
-        for (const SubListKey& key : keys) {
-            const char* name = key.button == Button::X ? "X" : "Y";
-            if (key.left) {
-                leftHints[left++] = name;
-                leftHints[left++] = key.label.c_str();
-            } else {
-                rightHints[right++] = name;
-                rightHints[right++] = key.label.c_str();
-            }
+        if (!empty) {
+            rightHints[right++] = "A";
+            rightHints[right++] = hintLabel.c_str();
         }
-        rightHints[right++] = "A";
-        rightHints[right++] = hintLabel.c_str();
         leftHints[left]   = nullptr;
         rightHints[right] = nullptr;
         screenView.getButtonHintsView().setHints(leftHints, rightHints);
@@ -309,6 +333,9 @@ private:
     std::string hintLabel;
     std::string shownLabel;
     bool hintsBuilt = false;
+    bool shownEmpty = false;
+    std::string titleText;
+    std::string kindText;
     long shownVersion = 0;
     std::vector<SubListKey> keys;
     int flip = 0;

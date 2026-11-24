@@ -23,8 +23,11 @@ using namespace input;
 
 namespace {
 
-constexpr const char* kLeftHints[]  = {"START", "CONTROLS", nullptr};
-constexpr const char* kRightHints[] = {"B", "BACK", "A", "PLAY", nullptr};
+// One action besides A and B: it is the third, shown as it is. An empty playlist has nothing to act on.
+constexpr const char* kLeftHints[]       = {"X", "REMOVE", nullptr};
+constexpr const char* kRightHints[]      = {"B", "BACK", "A", "PLAY", nullptr};
+constexpr const char* kEmptyLeftHints[]  = {"START", "CONTROLS", nullptr};
+constexpr const char* kEmptyRightHints[] = {"B", "BACK", nullptr};
 
 /** The rows of the tracks of a playlist */
 class TrackListAdapter final : public ListAdapter {
@@ -61,7 +64,6 @@ public:
     PlaylistTracksPageImpl(int playlistId, std::string name) : UiPageImpl(PageKind::FullScreen), playlistId(playlistId), name(std::move(name)) {
         screenView.getTitleView().setText("Playlist " + this->name);
         screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
         emptyState.setMessage("No tracks in playlist");
         emptyState.setLine("Add tracks from the music browser");
         screenView.setEmptyState(&emptyState);
@@ -78,6 +80,7 @@ public:
         tracks.reload(playlistId);
         screenView.setAdapter(tracks);
         list.start();
+        updateHints();
     }
 
     /** The player can remove nothing, but the playlist can change on the card: read it again */
@@ -143,6 +146,12 @@ private:
         list.notifyDataChanged();
         if (position >= 0) list.setSelectedIndex(position);
         updatePanel(list.getSelectedIndex());
+        updateHints();
+    }
+
+    void updateHints() {
+        const bool empty = tracks.getCount() == 0;
+        screenView.getButtonHintsView().setHints(empty ? kEmptyLeftHints : kLeftHints, empty ? kEmptyRightHints : kRightHints);
     }
 
     int playlistId;

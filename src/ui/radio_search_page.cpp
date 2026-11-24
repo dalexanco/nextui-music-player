@@ -8,6 +8,7 @@
 #include "radio.h"
 #include "radio_search.hpp"
 #include "toast.h"
+#include "ui/choice_options_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/radio_station_panel.hpp"
 #include "ui/text_input_page.hpp"
@@ -23,7 +24,7 @@ using namespace input;
 
 namespace {
 
-constexpr const char* kLeftHints[]       = {"Y", "KEYBOARD", "X", "COUNTRY", nullptr};
+constexpr const char* kLeftHints[]       = {"Y", "OPTIONS", nullptr};
 constexpr const char* kFieldHints[]      = {"B", "BACK", "A", "SEARCH", nullptr};
 constexpr const char* kStationHints[]    = {"B", "BACK", "A", "ADD", nullptr};
 
@@ -167,11 +168,7 @@ public:
             return true;
         }
         if (event.isSingleButton(Button::Y)) {
-            openKeyboard();
-            return true;
-        }
-        if (event.isSingleButton(Button::X)) {
-            nextCountry();
+            openOptions();
             return true;
         }
         return false;
@@ -211,7 +208,19 @@ private:
         });
     }
 
-    /** X: all the countries, then each country in turn */
+    /** Y: the keyboard of the search, and the country of the filter. */
+    void openOptions() {
+        const std::string code = state.getCountryCode();
+        const std::vector<std::string> labels = {"Search with the keyboard",
+                                                 "Next country (now " + (code.empty() ? std::string("all") : code) + ")"};
+        getNavigator().openForResult(ChoiceOptionsPage(THEME_SOURCE_RADIO, "STATIONS", "Add stations", "Search", labels),
+                                     [this](const ChoiceResult& result) {
+                                         if (result.index == 0) openKeyboard();
+                                         if (result.index == 1) nextCountry();
+                                     });
+    }
+
+    /** All the countries, then each country in turn */
     void nextCountry() {
         const int countries = Radio_getCuratedCountryCount();
         state.countryIndex  = state.countryIndex + 1 >= countries ? -1 : state.countryIndex + 1;

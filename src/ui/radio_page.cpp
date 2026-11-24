@@ -8,6 +8,7 @@
 #include "radio.h"
 #include "toast.h"
 #include "ui/confirm_dialog_page.hpp"
+#include "ui/choice_options_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/radio_manage_page.hpp"
 #include "ui/radio_playing_page.hpp"
@@ -33,9 +34,11 @@ using namespace input;
 
 namespace {
 
-constexpr const char* kLeftHints[]       = {"START", "CONTROLS", nullptr};
-constexpr const char* kRightHints[]      = {"B", "BACK", "A", "PLAY", nullptr};
-constexpr const char* kEmptyRightHints[] = {"Y", "MANAGE", "B", "BACK", nullptr};
+constexpr const char* kLeftHints[]       = {"Y", "OPTIONS", nullptr};
+constexpr const char* kRightHints[]      = {"B", "BACK", "A", "LISTEN", nullptr};
+// A list with no station has one action besides B: it is the third, shown as it is
+constexpr const char* kEmptyLeftHints[]  = {"Y", "MANAGE", nullptr};
+constexpr const char* kEmptyRightHints[] = {"B", "BACK", nullptr};
 
 /** The URL of the station of the cursor when the station list closed last */
 std::string lastSelectedUrl;
@@ -147,11 +150,7 @@ public:
             return true;
         }
         if (event.isSingleButton(Button::Y)) {
-            getNavigator().openForResult(RadioManagePage{}, [this](const std::monostate&) { reloadStations(); });
-            return true;
-        }
-        if (event.isSingleButton(Button::X)) {
-            confirmRemoval();
+            openOptions();
             return true;
         }
         return false;
@@ -203,6 +202,22 @@ private:
         }
     }
 
+    void manageStations() {
+        getNavigator().openForResult(RadioManagePage{}, [this](const std::monostate&) { reloadStations(); });
+    }
+
+    /** Y: manage the stations (alone while the list is empty), or remove the one under the cursor. */
+    void openOptions() {
+        int index;
+        const RadioStation* station = getSelectedStation(index);
+        if (!station) {
+            manageStations();
+            return;
+        }
+        openActionOptions(getNavigator(), THEME_SOURCE_RADIO, "RADIO", "Radio", station->name,
+                          {{"Manage stations", [this] { manageStations(); }}, {"Remove station", [this] { confirmRemoval(); }}});
+    }
+
     void confirmRemoval() {
         int index;
         const RadioStation* station = getSelectedStation(index);
@@ -228,7 +243,8 @@ private:
     }
 
     void updateHints() {
-        screenView.getButtonHintsView().setHints(kLeftHints, stations.getCount() > 0 ? kRightHints : kEmptyRightHints);
+        const bool empty = stations.getCount() == 0;
+        screenView.getButtonHintsView().setHints(empty ? kEmptyLeftHints : kLeftHints, empty ? kEmptyRightHints : kRightHints);
     }
 
     StationListAdapter stations;

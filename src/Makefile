@@ -238,7 +238,7 @@ LOCAL_SRC = \
     ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/radio_stations_page.cpp ui/radio_search_page.cpp radio_search.cpp ui/radio_options_page.cpp ui/radio_station_panel.cpp ui/view/star_icon.cpp radio_station_name.cpp ui/podcast_page.cpp ui/podcast_queue_page.cpp ui/podcast_manage_page.cpp ui/podcast_catalog_page.cpp ui/podcast_playing_page.cpp ui/podcast_options_page.cpp ui/podcast_art.cpp podcast_sleep.c ui/podcast_episodes_page.cpp ui/view/check_icon.cpp ui/podcast_show_panel.cpp podcast_format.cpp \
     ui/settings_page.cpp ui/errors_page.cpp ui/about_page.cpp ui/app_update_page.cpp ui/ytdlp_install_page.cpp ui/file_browser_page.cpp \
     ui/playlists_page.cpp ui/music_player_page.cpp ui/music_options_page.cpp ui/music_player_layout.cpp ui/sub_list_page.cpp ui/music_queue_page.cpp ui/add_to_playlist_page.cpp ui/playlist_tracks_page.cpp ui/text_input_page.cpp ui/downloader_page.cpp \
-    ui/main_menu_page.cpp \
+    ui/main_menu_page.cpp ui/choice_options_page.cpp \
     ui/view/ui_view.cpp ui/view/ui_layout_context.cpp ui/view/ui_compositor.cpp \
     ui/view/text_view.cpp ui/view/title_text_view.cpp ui/view/list_row_view.cpp ui/view/list_view.cpp \
     ui/view/scroll_indicator_view.cpp ui/view/scroll_view.cpp ui/view/vertical_layout.cpp ui/view/platform_group_view.cpp ui/view/status_group_view.cpp \

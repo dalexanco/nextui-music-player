@@ -35,6 +35,23 @@ From the current UI on `main` to the target designed in the canvas
 
 Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` options, `START` help.
 
+### Hint bar rule
+
+The bar under each native page holds **three actions at most**: the call to action (`A`), the negative action (`B`
+back, or the equivalent) and one more.
+
+- A page with more than one extra action puts them in an options panel and shows `Y OPTIONS` as the third action
+  (`ChoiceOptionsPage` / `openActionOptions()` for the lists, the `OptionsPanelView` pages for the players). It sits at the
+  left of the bar, in the place of `START CONTROLS`, as the canvas boards do.
+- A page with a single extra action shows it as it is (`X REMOVE`, `X REFRESH`), also at the left.
+- A page with no extra action keeps `START CONTROLS` at the left (the menus of the boards).
+- `A` goes when there is nothing to act on (empty list); `START` keeps opening the help on every page.
+- The help texts name the options (`Y  Options (Manage, Remove)`) and no longer list the keys that moved into the panel.
+
+Applied to: podcasts (`A OPEN`, `B BACK`, `Y OPTIONS`: manage, unsubscribe), episodes (`Y OPTIONS`: refresh, mark played / new),
+radio list and manage list (`Y OPTIONS`), add stations (`Y OPTIONS`: keyboard, country), playlists (`Y OPTIONS`: new, delete),
+file browser (`Y OPTIONS` on a file: add to a playlist, delete), playlist tracks (`X REMOVE`), top shows (`X REFRESH`).
+
 ## 2. What exists today (to verify at the start of each step)
 
 - **Already native pages** (C++, `UiPageImpl`, `ListScreenView`): main menu, library, radio station list, settings,

@@ -83,7 +83,13 @@ public:
     }
 
     std::vector<SubListKey> getKeys() const override {
-        return {SubListKey{input::Button::Y, "REFRESH", true}, SubListKey{input::Button::X, "PLAYED", false}};
+        return {SubListKey{input::Button::Y, "Refresh the episodes"}, SubListKey{input::Button::X, "Mark as played"}};
+    }
+
+    std::string getKeyLabel(const SubListKey& key, int index) const override {
+        if (key.button != input::Button::X) return key.label;
+        // The row that is listened to goes back to new
+        return index >= 0 && index < count && briefs[static_cast<size_t>(index)].progress_sec == -1 ? "Mark as new" : key.label;
     }
 
     void onTick() override {

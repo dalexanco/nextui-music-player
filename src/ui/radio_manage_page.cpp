@@ -32,7 +32,9 @@ using namespace input;
 namespace {
 
 constexpr const char* kLeftHints[]  = {"Y", "OPTIONS", nullptr};
-constexpr const char* kRightHints[] = {"B", "BACK", "X", "FAVOURITE", "A", "LISTEN", nullptr};
+constexpr const char* kRightHints[] = {"B", "BACK", "A", "LISTEN", nullptr};
+// A list with no station has nothing to listen to
+constexpr const char* kEmptyRightHints[] = {"B", "BACK", nullptr};
 
 /** The rows of the stations. A favourite has a star before its name. */
 class ManageAdapter final : public ListAdapter {
@@ -80,7 +82,7 @@ public:
         screenView.getTitleView().setText("Manage Stations");
         screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
         emptyState.setMessage("No stations saved");
-        emptyState.setLine("Press Y to add stations");
+        emptyState.setLine("Press Y for options");
         screenView.setEmptyState(&emptyState);
         screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
     }
@@ -95,6 +97,7 @@ public:
     void onEnter() override {
         screenView.setAdapter(stations);
         list.start();
+        updateHints();
     }
 
     void layout(UiLayoutContext& context) override {
@@ -110,10 +113,6 @@ public:
         }
         if (event.isSingleButton(Button::B)) {
             close();
-            return true;
-        }
-        if (event.isSingleButton(Button::X)) {
-            toggleFavourite();
             return true;
         }
         if (event.isSingleButton(Button::Y)) {
@@ -151,12 +150,13 @@ private:
         });
     }
 
-    void toggleFavourite() {
-        const RadioStation* station = getSelectedStation();
-        if (!station) return;
-        const bool now = RadioFavourites_toggleFavourite(station->url);
-        Toast_show(now ? "Added to favourites" : "Removed from favourites", TOAST_DURATION);
-        reloadKeepingCursor();
+    /** A with no station does nothing, thus the bar keeps no A for an empty list. */
+    void updateHints() {
+        const bool empty = stations.getCount() == 0;
+        if (empty == hintsForEmpty && hintsSet) return;
+        hintsSet      = true;
+        hintsForEmpty = empty;
+        screenView.getButtonHintsView().setHints(kLeftHints, empty ? kEmptyRightHints : kRightHints);
     }
 
     void openOptions() {
@@ -218,8 +218,11 @@ private:
         list.notifyDataChanged();
         if (position >= 0) list.setSelectedIndex(position);
         updatePanel(list.getSelectedIndex());
+        updateHints();
     }
 
+    bool hintsSet      = false;
+    bool hintsForEmpty = false;
     ManageAdapter stations;
     ListScreenView screenView{Fonts_getLarge()};
     EmptyStateView emptyState;

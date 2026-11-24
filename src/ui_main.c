@@ -39,8 +39,7 @@ static const ControlHelp library_menu_controls[] = {
 static const ControlHelp browser_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Add to Playlist"},
-    {"X", "Delete File"},
+    {"Y", "Options (Add, Delete)"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -96,8 +95,7 @@ static const ControlHelp keyboard_controls[] = {
 static const ControlHelp playlist_list_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "New Playlist"},
-    {"X", "Delete Playlist"},
+    {"Y", "Options (New, Delete)"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -115,8 +113,7 @@ static const ControlHelp playlist_detail_controls[] = {
 static const ControlHelp radio_list_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Manage Stations"},
-    {"X", "Delete Station"},
+    {"Y", "Options (Manage, Remove)"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -138,8 +135,7 @@ static const ControlHelp radio_playing_controls[] = {
 static const ControlHelp radio_manage_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"X", "Favourite"},
-    {"Y", "Options"},
+    {"Y", "Options (Favourite...)"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -158,8 +154,7 @@ static const ControlHelp radio_browse_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
     {"A", "Add Station / Search"},
-    {"Y", "Keyboard"},
-    {"X", "Next Country"},
+    {"Y", "Options (Keyboard...)"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -168,8 +163,7 @@ static const ControlHelp radio_browse_controls[] = {
 static const ControlHelp podcast_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"X", "Unsubscribe"},
-    {"Y", "Manage Podcasts"},
+    {"Y", "Options (Manage...)"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -205,8 +199,7 @@ static const ControlHelp podcast_search_controls[] = {
 static const ControlHelp podcast_episodes_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Refresh Episodes"},
-    {"X", "Mark Played/Unplayed"},
+    {"Y", "Options (Refresh...)"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -225,7 +218,8 @@ static const ControlHelp podcast_playing_controls[] = {
     {"Left", "Rewind 10s"},
     {"Right", "Forward 30s"},
     {"Up/Down", "Playback Speed"},
-    {"L2/L3", "Toggle Spectrum"},
+    {"X", "Episodes"},
+    {"Y", "Options"},
     {"Select", "Screen Off"},
     {"Select + A", "Wake Screen"},
     {"Start (hold)", "Exit App"},

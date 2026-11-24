@@ -11,6 +11,7 @@
 #include "module_podcast.h"
 #include "podcast.h"
 #include "toast.h"
+#include "ui/choice_options_page.hpp"
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/podcast_episodes_page.hpp"
@@ -32,8 +33,9 @@ using namespace input;
 
 namespace {
 
-constexpr const char* kLeftHints[]  = {"Y", "MANAGE", nullptr};
-constexpr const char* kRightHints[] = {"B", "BACK", "X", "UNSUBSCRIBE", "A", "OPEN", nullptr};
+constexpr const char* kLeftHints[]      = {"Y", "OPTIONS", nullptr};
+constexpr const char* kRightHints[]     = {"B", "BACK", "A", "OPEN", nullptr};
+constexpr const char* kEmptyRightHints[] = {"B", "BACK", nullptr};
 
 /** What a row of the list is */
 enum class RowKind { Continue, Show, Downloads, None };
@@ -137,7 +139,7 @@ public:
         screenView.getTitleView().setText("Podcasts");
         screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
         emptyState.setMessage("No podcasts subscribed");
-        emptyState.setLine("Press Y to manage podcasts");
+        emptyState.setLine("Press Y for options");
         screenView.setEmptyState(&emptyState);
         screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
     }
@@ -158,6 +160,7 @@ public:
         list.start();
         shownSignature = getSignature();
         updatePanel(list.getSelectedIndex());
+        updateHints();
         // A podcast that plays in the background opens its player at once
         if (Background_getActive() == BG_PODCAST && Podcast_isActive()) getNavigator().open(PodcastPlayingPage{});
     }
@@ -200,12 +203,8 @@ public:
             close();
             return true;
         }
-        if (event.isSingleButton(Button::X)) {
-            unsubscribe();
-            return true;
-        }
         if (event.isSingleButton(Button::Y)) {
-            getNavigator().open(PodcastManagePage{});
+            openOptions();
             return true;
         }
         return false;
@@ -257,6 +256,30 @@ private:
         }
     }
 
+    /** The actions of the list besides A: manage the podcasts, and unsubscribe the show under the cursor. */
+    void openOptions() {
+        int inKind = 0;
+        const bool onShow = rows.getKind(list.getSelectedIndex(), inKind) == RowKind::Show;
+        const PodcastFeed* feed = onShow ? Podcast_getSubscription(inKind) : nullptr;
+        std::vector<std::string> labels = {"Search and top shows"};
+        if (feed) labels.push_back("Unsubscribe");
+        getNavigator().openForResult(
+            ChoiceOptionsPage(THEME_SOURCE_PODCAST, "PODCASTS", feed ? "Show" : "Podcasts", feed ? feed->title : "Manage", labels),
+            [this](const ChoiceResult& result) {
+                if (result.index == 0) getNavigator().open(PodcastManagePage{});
+                if (result.index == 1) unsubscribe();
+            });
+    }
+
+    /** A with nothing under the cursor does nothing, thus the bar keeps no A for an empty list. */
+    void updateHints() {
+        const bool empty = rows.getCount() == 0;
+        if (empty == hintsForEmpty && hintsSet) return;
+        hintsSet       = true;
+        hintsForEmpty  = empty;
+        screenView.getButtonHintsView().setHints(kLeftHints, empty ? kEmptyRightHints : kRightHints);
+    }
+
     void unsubscribe() {
         int inKind = 0;
         if (rows.getKind(list.getSelectedIndex(), inKind) != RowKind::Show) return;
@@ -304,8 +327,11 @@ private:
         list.notifyDataChanged();
         if (position >= 0) list.setSelectedIndex(position);
         updatePanel(list.getSelectedIndex());
+        updateHints();
     }
 
+    bool hintsSet      = false;
+    bool hintsForEmpty = false;
     ShowsAdapter rows;
     std::string shownSignature;
     ListScreenView screenView{Fonts_getLarge()};

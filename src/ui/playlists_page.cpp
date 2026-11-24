@@ -7,6 +7,7 @@
 #include "playlist_m3u.h"
 #include "toast.h"
 #include "ui/confirm_dialog_page.hpp"
+#include "ui/choice_options_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/playlist_tracks_page.hpp"
 #include "ui/text_input_page.hpp"
@@ -22,9 +23,11 @@ using namespace input;
 
 namespace {
 
-constexpr const char* kLeftHints[]       = {"START", "CONTROLS", nullptr};
+constexpr const char* kLeftHints[]       = {"Y", "OPTIONS", nullptr};
 constexpr const char* kRightHints[]      = {"B", "BACK", "A", "OPEN", nullptr};
-constexpr const char* kEmptyRightHints[] = {"Y", "NEW", "B", "BACK", nullptr};
+// With no playlist the one action besides B is the third, shown as it is
+constexpr const char* kEmptyLeftHints[]  = {"Y", "NEW", nullptr};
+constexpr const char* kEmptyRightHints[] = {"B", "BACK", nullptr};
 
 /** The rows of the playlists, which the page reads again after a change */
 class PlaylistListAdapter final : public ListAdapter {
@@ -94,11 +97,7 @@ public:
             return true;
         }
         if (event.isSingleButton(Button::Y)) {
-            createPlaylist();
-            return true;
-        }
-        if (event.isSingleButton(Button::X)) {
-            confirmDelete();
+            openOptions();
             return true;
         }
         return false;
@@ -122,6 +121,17 @@ private:
         const PlaylistInfo* playlist = playlists.get(list.getSelectedIndex());
         if (!playlist) return;
         getNavigator().open(PlaylistTracksPage(playlist->id, playlist->name));
+    }
+
+    /** Y: a new playlist (alone while there is none), or the delete of the playlist under the cursor. */
+    void openOptions() {
+        const PlaylistInfo* playlist = playlists.get(list.getSelectedIndex());
+        if (!playlist) {
+            createPlaylist();
+            return;
+        }
+        openActionOptions(getNavigator(), THEME_SOURCE_MUSIC, "PLAYLIST", "Playlist", playlist->name,
+                          {{"New playlist", [this] { createPlaylist(); }}, {"Delete playlist", [this] { confirmDelete(); }}});
     }
 
     void createPlaylist() {
@@ -159,7 +169,8 @@ private:
     }
 
     void updateHints() {
-        screenView.getButtonHintsView().setHints(kLeftHints, playlists.getCount() > 0 ? kRightHints : kEmptyRightHints);
+        const bool empty = playlists.getCount() == 0;
+        screenView.getButtonHintsView().setHints(empty ? kEmptyLeftHints : kLeftHints, empty ? kEmptyRightHints : kRightHints);
     }
 
     PlaylistListAdapter playlists;

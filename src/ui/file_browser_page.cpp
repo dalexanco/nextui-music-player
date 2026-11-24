@@ -20,6 +20,7 @@
 #include "ui/add_to_playlist_page.hpp"
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/now_playing_page.hpp"
+#include "ui/choice_options_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/detail_panel_view.hpp"
 #include "ui/view/empty_state_view.hpp"
@@ -34,8 +35,12 @@ using namespace input;
 
 namespace {
 
-constexpr const char* kLeftHints[]  = {"START", "CONTROLS", nullptr};
-constexpr const char* kRightHints[] = {"B", "BACK", "A", "SELECT", nullptr};
+// A file has two actions besides A and B (add to a playlist, delete): they are behind Y OPTIONS. A
+// folder has one, shown as it is, and ".." and Play All have none.
+constexpr const char* kLeftHints[]        = {"START", "CONTROLS", nullptr};
+constexpr const char* kFileLeftHints[]    = {"Y", "OPTIONS", nullptr};
+constexpr const char* kFolderLeftHints[]  = {"Y", "PLAYLIST", nullptr};
+constexpr const char* kRightHints[]       = {"B", "BACK", "A", "SELECT", nullptr};
 
 /** How often the browser asks the database whether the folder changed, in milliseconds */
 constexpr uint32_t kUpdateCheckMs = 100;
@@ -157,12 +162,8 @@ public:
             goBack();
             return true;
         }
-        if (event.isSingleButton(Button::X)) {
-            confirmDelete();
-            return true;
-        }
         if (event.isSingleButton(Button::Y)) {
-            addToPlaylist();
+            openOptions();
             return true;
         }
         return false;
@@ -171,7 +172,32 @@ public:
 private:
     BrowserContext& browser() { return rows.getContext(); }
 
-    void onSelectionChanged(int index) override { updatePanel(index); }
+    void onSelectionChanged(int index) override {
+        updatePanel(index);
+        updateHints(index);
+    }
+
+    /** The left of the bar follows the row: its options, or START for a row that has none. */
+    void updateHints(int index) {
+        const FileEntry* entry = rows.get(index);
+        const char* const* left = kLeftHints;
+        if (entry && !entry->is_play_all && !isParentRow(*entry)) left = entry->is_dir ? kFolderLeftHints : kFileLeftHints;
+        screenView.getButtonHintsView().setHints(left, kRightHints);
+    }
+
+    /** Y: the options of a file, or the playlist of a folder. ".." and Play All are not targets. */
+    void openOptions() {
+        const FileEntry* entry = rows.get(list.getSelectedIndex());
+        if (!entry || entry->is_play_all || isParentRow(*entry)) return;
+        if (entry->is_dir) {
+            addToPlaylist();
+            return;
+        }
+        char display[256];
+        get_file_display_name(entry->name, display, sizeof(display));
+        openActionOptions(getNavigator(), THEME_SOURCE_MUSIC, "FILE", "Music", display,
+                          {{"Add to playlist", [this] { addToPlaylist(); }}, {"Delete file", [this] { confirmDelete(); }}});
+    }
 
     /** Fills the detail panel: a tile with the name of the row, where it is, and its place in the folder */
     void updatePanel(int index) {

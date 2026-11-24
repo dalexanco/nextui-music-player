@@ -15,11 +15,15 @@
 /** The mark at the start of a row: a star for what is new, a check for what is done */
 enum class SubListMark : uint8_t { None, New, Done };
 
-/** A key of the page besides A and B, with the label of its hint. `left` puts the hint with START. */
+/**
+ * An action of the page besides A and B. The hint bar holds three actions at most (see the hint bar
+ * rule of the plan): a source with one key shows it as `button label` at the left of the bar, and a
+ * source with several keys shows `Y OPTIONS`, whose panel lists them by `label`. `button` is what
+ * the source gets in onKey().
+ */
 struct SubListKey {
     input::Button button;
     std::string label;
-    bool left;
 };
 
 /**
@@ -60,7 +64,10 @@ public:
     /** Called each time the page reads the rows again, before it does. */
     virtual void onReload() {}
 
-    /** Returns the keys of the source besides A and B (X and Y). */
+    /** Returns the label of the key in the options panel, for the row at `index`. The default is its `label`. */
+    virtual std::string getKeyLabel(const SubListKey& key, [[maybe_unused]] int index) const { return key.label; }
+
+    /** Returns the actions of the source besides A and B. */
     virtual std::vector<SubListKey> getKeys() const { return {}; }
 
     /**
