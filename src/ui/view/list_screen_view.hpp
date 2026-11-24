@@ -25,6 +25,9 @@ public:
      */
     void setEmptyState(EmptyStateView* emptyState) { this->emptyState = emptyState; }
 
+    /** See ScreenView::setSidePanel(). The list gets the room that the panel leaves. */
+    using ScreenView::setSidePanel;
+
     void layout(UiLayoutContext& context) override;
 
 private:

@@ -245,6 +245,7 @@ LOCAL_SRC = \
     ui/view/scroll_indicator_view.cpp ui/view/scroll_view.cpp ui/view/vertical_layout.cpp ui/view/platform_group_view.cpp ui/view/status_group_view.cpp \
     ui/view/button_hints_view.cpp ui/view/list_screen_view.cpp ui/view/screen_view.cpp ui/view/box_view.cpp \
     ui/view/dialog_view.cpp ui/view/multiline_text_view.cpp ui/view/snapshot_view.cpp ui/view/bitmap_view.cpp ui/view/progress_bar_view.cpp ui/view/empty_state_view.cpp ui/view/background_view.cpp ui/view/source_gradient.cpp \
+    ui/view/detail_panel_layout.cpp ui/view/art_tile_view.cpp ui/view/info_block_view.cpp ui/view/detail_panel_view.cpp \
     audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c

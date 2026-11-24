@@ -27,4 +27,11 @@ uint32_t getSourceGradientPixel(int x, int y, int width, int height, const Sourc
 /** Renders the whole background in `pixels`, which hold `height` rows of `pitchPixels` pixels. */
 void renderSourceGradient(uint32_t* pixels, int width, int height, int pitchPixels, const SourcePalette& palette);
 
+/**
+ * Renders a tile for an art that has no image: a linear gradient at 145 degrees from `from` at the
+ * top left to `to` at the bottom right, with rounded corners of `radius` pixels. The pixels are
+ * ARGB8888 with premultiplied alpha, and the corners are transparent.
+ */
+void renderArtTile(uint32_t* pixels, int width, int height, int pitchPixels, SDL_Color from, SDL_Color to, int radius);
+
 #endif

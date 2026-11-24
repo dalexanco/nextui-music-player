@@ -101,3 +101,35 @@ void renderSourceGradient(uint32_t* pixels, int width, int height, int pitchPixe
         for (int x = 0; x < width; x++) row[x] = pixelOf(geometry, x, y, deep, floor, accent);
     }
 }
+
+void renderArtTile(uint32_t* pixels, int width, int height, int pitchPixels, SDL_Color from, SDL_Color to, int radius) {
+    const float angle = 145.0f * kPi / 180.0f;
+    const float dx    = std::sin(angle);
+    const float dy    = -std::cos(angle);
+    const float w     = static_cast<float>(width);
+    const float h     = static_cast<float>(height);
+    const float len   = std::fabs(w * dx) + std::fabs(h * dy);
+    const float r     = static_cast<float>(std::min(radius, std::min(width, height) / 2));
+    for (int y = 0; y < height; y++) {
+        uint32_t* row = pixels + static_cast<size_t>(y) * static_cast<size_t>(pitchPixels);
+        for (int x = 0; x < width; x++) {
+            const float px = static_cast<float>(x) + 0.5f;
+            const float py = static_cast<float>(y) + 0.5f;
+            const float t  = std::clamp(((px - w / 2) * dx + (py - h / 2) * dy) / len + 0.5f, 0.0f, 1.0f);
+            // The coverage of the pixel by the rounded rectangle: the distance from the center of
+            // the corner circle that the pixel is near, if it is in a corner square
+            float coverage = 1.0f;
+            const float cx = std::clamp(px, r, w - r);
+            const float cy = std::clamp(py, r, h - r);
+            const float ex = px - cx;
+            const float ey = py - cy;
+            if (ex != 0.0f || ey != 0.0f) coverage = std::clamp(r - std::sqrt(ex * ex + ey * ey) + 0.5f, 0.0f, 1.0f);
+            const Rgb color = mix(toRgb(from), toRgb(to), t);
+            const auto channel = [coverage](float value) {
+                return static_cast<uint32_t>(std::clamp(value * coverage + 0.5f, 0.0f, 255.0f));
+            };
+            const uint32_t alpha = static_cast<uint32_t>(std::clamp(255.0f * coverage + 0.5f, 0.0f, 255.0f));
+            row[x] = (alpha << 24) | (channel(color.r) << 16) | (channel(color.g) << 8) | channel(color.b);
+        }
+    }
+}

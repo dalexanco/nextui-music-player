@@ -65,6 +65,13 @@ public:
      */
     void setScrollingContent(ScrollingView* content, ContentMargins margins = ContentMargins::None);
 
+    /**
+     * Shows `panel` in the right third of the body, and lays out the content in the room that is
+     * left. The view stays with the caller. Pass null for no panel. A page can set it again at
+     * each layout, as the "Source colours" setting changes.
+     */
+    void setSidePanel(UiView* panel) { sidePanel = panel; }
+
     void layout(UiLayoutContext& context) override;
 
 private:
@@ -74,6 +81,7 @@ private:
     StatusGroupView statusView;
     ButtonHintsView buttonHintsView;
     UiView* content                 = nullptr;
+    UiView* sidePanel               = nullptr;
     ScrollingView* scrollingContent = nullptr;
     ContentMargins margins          = ContentMargins::None;
     ScrollIndicatorView scrollUpView{ScrollIndicatorView::Direction::Up};

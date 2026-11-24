@@ -101,6 +101,7 @@ TESTS   += $(BIN)/test_activity_clock
 TESTS   += $(BIN)/test_page_stack
 TESTS   += $(BIN)/test_ui_compositor
 TESTS   += $(BIN)/test_source_gradient
+TESTS   += $(BIN)/test_detail_panel_layout
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -247,6 +248,12 @@ $(BIN)/test_ui_compositor: test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) $(SRC)/ui
 $(BIN)/test_source_gradient: test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp \
                             $(SRC)/ui/view/source_gradient.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp
+
+$(BIN)/test_detail_panel_layout: test_detail_panel_layout.cpp $(SRC)/ui/view/detail_panel_layout.cpp \
+                                 $(SRC)/ui/view/detail_panel_layout.hpp $(SRC)/ui/view/source_gradient.cpp \
+                                 $(SRC)/ui/view/source_gradient.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_detail_panel_layout.cpp $(SRC)/ui/view/detail_panel_layout.cpp \
+	  $(SRC)/ui/view/source_gradient.cpp
 
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c

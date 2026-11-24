@@ -1,5 +1,6 @@
 #include "ui/view/screen_view.hpp"
 
+#include "ui/view/detail_panel_layout.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
 
@@ -79,7 +80,12 @@ void ScreenView::layout(UiLayoutContext& context) {
     const int padding       = SCALE1(PADDING);
     const int side          = margins == ContentMargins::None ? 0 : padding;
     const int foot          = margins == ContentMargins::SidesAndFoot ? padding : 0;
-    const SDL_Rect bodyRect = {side, bodyTop, context.getMaxSize().w - side * 2, bodyBottom - bodyTop - foot};
+    SDL_Rect bodyRect = {side, bodyTop, context.getMaxSize().w - side * 2, bodyBottom - bodyTop - foot};
+    if (sidePanel) {
+        const SidePanelRects rects = layoutSidePanel(bodyRect, context.getMaxSize().w, padding);
+        context.layoutChild(*sidePanel, rects.panel);
+        bodyRect = rects.list;
+    }
     context.layoutChild(*content, bodyRect);
     if (scrollingContent) layoutScrollIndicators(context, bodyRect);
 }
@@ -92,9 +98,12 @@ void ScreenView::layoutScrollIndicators(UiLayoutContext& context, const SDL_Rect
     const UiSize upSize           = upMeasuring.layoutChild(scrollUpView, wholeScreen).getSize();
     const UiSize downSize         = downMeasuring.layoutChild(scrollDownView, wholeScreen).getSize();
     const int downY               = contentRect.y + scrollingContent->getShownBottom();
-    context.layoutChild(scrollUpView,
-                        SDL_Rect{(wholeScreen.w - upSize.w) / 2, contentRect.y - upSize.h, upSize.w, upSize.h});
-    context.layoutChild(scrollDownView, SDL_Rect{(wholeScreen.w - downSize.w) / 2, downY, downSize.w, downSize.h});
+    // The indicators sit in the middle of the screen, or of the content where a side panel narrows it
+    const auto centered = [&](int width) {
+        return sidePanel ? contentRect.x + (contentRect.w - width) / 2 : (wholeScreen.w - width) / 2;
+    };
+    context.layoutChild(scrollUpView, SDL_Rect{centered(upSize.w), contentRect.y - upSize.h, upSize.w, upSize.h});
+    context.layoutChild(scrollDownView, SDL_Rect{centered(downSize.w), downY, downSize.w, downSize.h});
 
     // The compositor reads the visibility after the layout
     scrollUpView.setVisible(scrollingContent->canScrollUp());
