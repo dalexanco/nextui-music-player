@@ -45,17 +45,38 @@ static const ControlHelp browser_controls[] = {
     {NULL, NULL}
 };
 
-// Music player controls (A/B shown in footer)
+// Music player controls
 static const ControlHelp player_controls[] = {
-    {"X", "Toggle Shuffle"},
-    {"Y", "Toggle Repeat"},
+    {"A", "Play/Pause"},
+    {"B", "Back"},
+    {"X", "Queue"},
+    {"Y", "Options"},
     {"Up/R1", "Next Track"},
     {"Down/L1", "Prev Track"},
     {"Left/Right", "Seek"},
-    {"L2/L3", "Toggle Spectrum"},
     {"R2/R3", "Toggle Lyrics"},
     {"Select", "Screen Off"},
     {"Select + A", "Wake Screen"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Music options panel controls
+static const ControlHelp player_options_controls[] = {
+    {"Up/Down", "Select Option"},
+    {"Left/Right", "Change Value"},
+    {"A", "Change / Choose"},
+    {"B", "Close"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Queue controls
+static const ControlHelp queue_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"A", "Play Track"},
+    {"B", "Back"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -288,6 +309,14 @@ const ControlHelp* get_controls_help(HelpId help_id, const char** title) {
         case HELP_PLAYER:
             controls = player_controls;
             page_title = "Music Player";
+            break;
+        case HELP_PLAYER_OPTIONS:
+            controls = player_options_controls;
+            page_title = "Options";
+            break;
+        case HELP_QUEUE:
+            controls = queue_controls;
+            page_title = "Queue";
             break;
         case HELP_PLAYLIST_LIST:
             controls = playlist_list_controls;

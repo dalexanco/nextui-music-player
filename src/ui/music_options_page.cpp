@@ -58,7 +58,7 @@ public:
         return ListScreenController::getButtonRequests();
     }
 
-    HelpId getHelpId() const override { return HELP_PLAYER; }
+    HelpId getHelpId() const override { return HELP_PLAYER_OPTIONS; }
     ThemeSource getSource() const override { return THEME_SOURCE_MUSIC; }
 
     void onEnter() override {

@@ -155,6 +155,8 @@ progress row. Spectrum removed here. Lyrics stay a full-page mode until 1.8.
   The page is full-screen (art, dim, panel), not a `Dialog`, so the hint pills of the player do not show under its own.
 
 **1.8 Lyrics and help** — lyrics view in the new look; controls help page restyled.
+- **Status: done, reduced (built, not validated on device)** — the lyric window stays inline in the player (a full-page lyrics mode was not built: no board asks for it): the current line is larger and in the primary colour, the others secondary.
+  Help: the player table is rewritten for the new key map (X queue, Y options, no spectrum), new `HELP_PLAYER_OPTIONS` and `HELP_QUEUE` tables (`SubListPage` takes a `HelpId`), and the help dialog border takes the accent of the screen it explains while *Source colours* is on (`DialogView::setEdgeColor`).
 
 ### Phase 2 — Radio (closest to existing: the list is already a page)
 

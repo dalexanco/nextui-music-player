@@ -9,10 +9,17 @@
 /** The ground and the border of a dialog. */
 class DialogFrameView : public UiView {
 public:
+    /** Draws the border in `color` in place of the primary color of the theme. */
+    void setEdgeColor(SDL_Color color);
+    /** Goes back to the primary color of the theme. */
+    void clearEdgeColor();
+
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
 
 private:
+    bool hasEdgeColor = false;
+    SDL_Color edgeColor{};
     bool dirty = true;
 };
 
@@ -29,6 +36,10 @@ public:
 
     void setTitle(const std::string& text) { title.setText(text); }
     void setHint(const std::string& text) { hint.setText(text); }
+
+    /** Draws the border of the dialog in `color`. */
+    void setEdgeColor(SDL_Color color) { frame.setEdgeColor(color); }
+    void clearEdgeColor() { frame.clearEdgeColor(); }
 
     /**
      * Shows content between the title and the hint, as high as its layout makes it. A centered

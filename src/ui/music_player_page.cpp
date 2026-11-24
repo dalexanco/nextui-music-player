@@ -339,8 +339,8 @@ private:
     void layoutLyrics(UiLayoutContext& context, const PlayerRects& rects, int contentBottom) {
         if (!Settings_getBool(&SETTING_LYRICS_ENABLED)) return;
         const SDL_Rect room = layoutLyricsRect(rects, contentBottom, SCALE1(8));
-        TTF_Font* font      = Fonts_getSmall();
-        const int rowHeight = TTF_FontHeight(font);
+        // The current lyric is larger than the others, thus each row has the height of the larger font
+        const int rowHeight = TTF_FontHeight(Fonts_getMedium());
         const int gap       = SCALE1(kLyricRowGap);
         int rowCount        = rowHeight > 0 && room.h >= rowHeight ? (room.h + gap) / (rowHeight + gap) : 0;
         rowCount            = std::min(rowCount, static_cast<int>(kMaxLyricRows));
@@ -354,6 +354,7 @@ private:
             view.setText(Lyrics_lineText(lyricWindow.first + row));
             const ThemeRole role = (synced && row == lyricWindow.current_row) ? THEME_ROLE_PRIMARY : THEME_ROLE_SECONDARY;
             view.setColor(Theme_getColor(role, false));
+            view.setFont(role == THEME_ROLE_PRIMARY ? Fonts_getMedium() : Fonts_getSmall());
             context.layoutChild(view, SDL_Rect{room.x, room.y + row * (rowHeight + gap), room.w, rowHeight});
         }
     }

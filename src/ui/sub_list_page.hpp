@@ -5,6 +5,7 @@
 #include <string>
 #include <variant>
 
+#include "help_screen.h"
 #include "ui/page/ui_page.hpp"
 #include "ui_theme.h"
 
@@ -55,8 +56,13 @@ public:
      * EPISODES), `verb` is the label of A, and `source` is the source whose accent the page takes.
      */
     SubListPage(std::string title, std::string kind, std::string verb, ThemeSource source,
-                std::shared_ptr<SubListSource> rows)
-        : title(std::move(title)), kind(std::move(kind)), verb(std::move(verb)), source(source), rows(std::move(rows)) {}
+                std::shared_ptr<SubListSource> rows, HelpId helpId = HELP_NONE)
+        : title(std::move(title)),
+          kind(std::move(kind)),
+          verb(std::move(verb)),
+          source(source),
+          rows(std::move(rows)),
+          helpId(helpId) {}
 
     std::unique_ptr<UiPageImplBase> createPageImpl() const override;
 
@@ -66,6 +72,7 @@ private:
     std::string verb;
     ThemeSource source;
     std::shared_ptr<SubListSource> rows;
+    HelpId helpId;
 };
 
 #endif

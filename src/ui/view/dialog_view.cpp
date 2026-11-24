@@ -18,6 +18,19 @@ void fill(SDL_Surface* surface, const SDL_Rect& rect, SDL_Color color) {
 
 }  // namespace
 
+void DialogFrameView::setEdgeColor(SDL_Color color) {
+    if (hasEdgeColor && color.r == edgeColor.r && color.g == edgeColor.g && color.b == edgeColor.b) return;
+    hasEdgeColor = true;
+    edgeColor    = color;
+    dirty        = true;
+}
+
+void DialogFrameView::clearEdgeColor() {
+    if (!hasEdgeColor) return;
+    hasEdgeColor = false;
+    dirty        = true;
+}
+
 void DialogFrameView::draw(UiDrawContext& context) {
     dirty                = false;
     SDL_Surface* surface = context.getSurface();
@@ -26,7 +39,7 @@ void DialogFrameView::draw(UiDrawContext& context) {
     const int h      = surface->h;
     const int border = SCALE1(2);
     fill(surface, SDL_Rect{0, 0, w, h}, Theme_getColor(THEME_ROLE_SURFACE_BACKGROUND, false));
-    const SDL_Color edge = Theme_getColor(THEME_ROLE_PRIMARY, false);
+    const SDL_Color edge = hasEdgeColor ? edgeColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
     fill(surface, SDL_Rect{0, 0, w, border}, edge);
     fill(surface, SDL_Rect{0, h - border, w, border}, edge);
     fill(surface, SDL_Rect{0, 0, border, h}, edge);

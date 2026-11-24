@@ -141,8 +141,8 @@ private:
 class SubListPageImpl final : public UiPageImpl<SubListPage>, private ListScreenListener {
 public:
     SubListPageImpl(std::string title, std::string kind, std::string verb, ThemeSource source,
-                    std::shared_ptr<SubListSource> rows)
-        : UiPageImpl(PageKind::FullScreen), source(source), rows(std::move(rows)) {
+                    std::shared_ptr<SubListSource> rows, HelpId helpId)
+        : UiPageImpl(PageKind::FullScreen), source(source), helpId(helpId), rows(std::move(rows)) {
         screenView.getTitleView().setText(title);
         screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
         kindView.setText(kind);
@@ -163,6 +163,7 @@ public:
     }
 
     ThemeSource getSource() const override { return source; }
+    HelpId getHelpId() const override { return helpId; }
 
     void onEnter() override {
         screenView.setAdapter(rows);
@@ -203,6 +204,7 @@ public:
 
 private:
     ThemeSource source;
+    HelpId helpId;
     std::string verb;
     const char* rightHints[5] = {};
     SubListAdapter rows;
@@ -215,5 +217,5 @@ private:
 }  // namespace
 
 std::unique_ptr<UiPageImplBase> SubListPage::createPageImpl() const {
-    return std::make_unique<SubListPageImpl>(title, kind, verb, source, rows);
+    return std::make_unique<SubListPageImpl>(title, kind, verb, source, rows, helpId);
 }
