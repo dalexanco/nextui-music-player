@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Mes podcasts &amp; autres</title>
+  </head>
+  <body>
+    <outline text="Radio France" title="Radio France">
+      <outline type="rss" text="Bestioles" title="Bestioles"
+               xmlUrl="https://radiofrance-podcast.net/podcast09/podcast_a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974.xml"
+               htmlUrl="https://www.radiofrance.fr/franceinter/podcasts/bestioles"/>
+      <outline text="Histoire">
+        <outline type="rss" text="Les Odyss&#233;es" xmlUrl="https://radiofrance-podcast.net/podcast09/podcast_c361798b-d6e3-4282-ba0a-ebb051b9e424.xml"/>
+      </outline>
+    </outline>
+    <outline type="rss" text="Tom &amp; Jerry&apos;s &quot;Show&quot;" xmlUrl="https://example.com/feed?a=1&amp;b=2"/>
+    <outline type="rss" text="Bestioles again" xmlUrl="HTTPS://RadioFrance-Podcast.net/podcast09/podcast_a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974.xml#sub"/>
+    <outline type="link" text="A web page, no feed" htmlUrl="https://example.com/"/>
+    <outline type="rss" text="Not a web feed" xmlUrl="ftp://example.com/feed.xml"/>
+  </body>
+</opml>
