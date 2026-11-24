@@ -1,6 +1,7 @@
 #include "ui/podcast_page.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -14,6 +15,7 @@
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/podcast_episodes_page.hpp"
 #include "ui/podcast_legacy_page.hpp"
+#include "ui/podcast_playing_page.hpp"
 #include "ui/podcast_show_panel.hpp"
 #include "ui/view/detail_panel_view.hpp"
 #include "ui/view/empty_state_view.hpp"
@@ -156,7 +158,7 @@ public:
         shownSignature = getSignature();
         updatePanel(list.getSelectedIndex());
         // A podcast that plays in the background opens its player at once
-        if (Background_getActive() == BG_PODCAST && Podcast_isActive()) openLegacy(PODCAST_ENTRY_PLAYER, 0);
+        if (Background_getActive() == BG_PODCAST && Podcast_isActive()) getNavigator().open(PodcastPlayingPage{});
     }
 
     void onExit() override {
@@ -202,7 +204,7 @@ public:
             return true;
         }
         if (event.isSingleButton(Button::Y)) {
-            openLegacy(PODCAST_ENTRY_MANAGE, 0);
+            openLegacy(PODCAST_ENTRY_MANAGE);
             return true;
         }
         return false;
@@ -221,14 +223,36 @@ private:
                std::to_string(queue > 0) + "/" + std::to_string(newEpisodes);
     }
 
-    void openLegacy(PodcastEntry entry, int arg) { getNavigator().open(PodcastLegacyPage{entry, arg}); }
+    void openLegacy(PodcastEntry entry) { getNavigator().open(PodcastLegacyPage{entry}); }
+
+    /** Plays the episode of an entry of Continue Listening, which is found again by its guid. */
+    void continueListening(int index) {
+        const ContinueListeningEntry* entry = Podcast_getContinueListening(index);
+        if (!entry) return;
+        const int feed = Podcast_findFeedIndex(entry->feed_url);
+        if (feed < 0) {
+            Toast_show("Podcast not found", TOAST_DURATION);
+            return;
+        }
+        const PodcastFeed* feedPtr = Podcast_getSubscription(feed);
+        for (int episode = 0; feedPtr && episode < feedPtr->episode_count; episode++) {
+            const PodcastEpisode* ep = Podcast_getEpisode(feed, episode);
+            if (!ep || std::strcmp(ep->guid, entry->episode_guid) != 0) continue;
+            if (Podcast_episodeFileExists(const_cast<PodcastFeed*>(feedPtr), episode)) {
+                getNavigator().open(PodcastPlayingPage{feed, episode});
+                return;
+            }
+            break;
+        }
+        Toast_show("Episode not available", TOAST_DURATION);
+    }
 
     void open() {
         int inKind = 0;
         switch (rows.getKind(list.getSelectedIndex(), inKind)) {
-            case RowKind::Continue:  openLegacy(PODCAST_ENTRY_CONTINUE, inKind); break;
+            case RowKind::Continue:  continueListening(inKind); break;
             case RowKind::Show:      getNavigator().open(makePodcastEpisodesPage(inKind)); break;
-            case RowKind::Downloads: openLegacy(PODCAST_ENTRY_QUEUE, 0); break;
+            case RowKind::Downloads: openLegacy(PODCAST_ENTRY_QUEUE); break;
             case RowKind::None:      break;
         }
     }

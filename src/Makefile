@@ -225,7 +225,6 @@ LOCAL_SRC = \
     module_common.c music_session.c sleep_timer.c \
     radio_step.c module_podcast.c module_downloader.c \
     frame_state.c ui_layers.c lyric_window.c \
-    ui_podcast_playing.c \
     list_nav.c list_nav_pad.c mp3_seek.c seek_scan.c toast.c toast_state.c screen_title.c stopwatch.cpp error.cpp podcast_episode_layout.c \
     ui_fonts.c ui_icons.c ui_utils.c browser.c ui_album_art.c \
     ui_main.c ui_downloader.c ui_podcast.c \
@@ -236,7 +235,7 @@ LOCAL_SRC = \
     input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
     input/common_button_handler.cpp input/common_button_handler_nextui.cpp input/input_manager.cpp \
     browser_nav.cpp ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/page/list_screen_controller.cpp ui/quit_dialog_page.cpp ui/confirm_dialog_page.cpp ui/wifi_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
-    ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/radio_stations_page.cpp ui/radio_search_page.cpp radio_search.cpp ui/radio_options_page.cpp ui/radio_station_panel.cpp ui/view/star_icon.cpp radio_station_name.cpp ui/podcast_page.cpp ui/podcast_legacy_page.cpp ui/podcast_episodes_page.cpp ui/view/check_icon.cpp ui/podcast_show_panel.cpp podcast_format.cpp \
+    ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/radio_stations_page.cpp ui/radio_search_page.cpp radio_search.cpp ui/radio_options_page.cpp ui/radio_station_panel.cpp ui/view/star_icon.cpp radio_station_name.cpp ui/podcast_page.cpp ui/podcast_legacy_page.cpp ui/podcast_playing_page.cpp ui/podcast_options_page.cpp ui/podcast_art.cpp podcast_sleep.c ui/podcast_episodes_page.cpp ui/view/check_icon.cpp ui/podcast_show_panel.cpp podcast_format.cpp \
     ui/settings_page.cpp ui/errors_page.cpp ui/about_page.cpp ui/app_update_page.cpp ui/ytdlp_install_page.cpp ui/file_browser_page.cpp \
     ui/playlists_page.cpp ui/music_player_page.cpp ui/music_options_page.cpp ui/music_player_layout.cpp ui/sub_list_page.cpp ui/music_queue_page.cpp ui/add_to_playlist_page.cpp ui/playlist_tracks_page.cpp ui/text_input_page.cpp ui/downloader_page.cpp \
     ui/main_menu_page.cpp \

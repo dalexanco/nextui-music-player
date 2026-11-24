@@ -6,22 +6,20 @@ namespace {
 
 class PodcastLegacyPageImpl final : public LegacyModulePageImpl<PodcastLegacyPage> {
 public:
-    PodcastLegacyPageImpl(PodcastEntry entry, int arg, int arg2) : entry(entry), arg(arg), arg2(arg2) {}
+    explicit PodcastLegacyPageImpl(PodcastEntry entry) : entry(entry) {}
 
 protected:
     ModuleExitReason runModule(DisplayContext* display) override {
-        PodcastModule_setEntry(entry, arg, arg2);
+        PodcastModule_setEntry(entry);
         return PodcastModule_run(display);
     }
 
 private:
     PodcastEntry entry;
-    int arg;
-    int arg2;
 };
 
 }  // namespace
 
 std::unique_ptr<UiPageImplBase> PodcastLegacyPage::createPageImpl() const {
-    return std::make_unique<PodcastLegacyPageImpl>(entry, arg, arg2);
+    return std::make_unique<PodcastLegacyPageImpl>(entry);
 }

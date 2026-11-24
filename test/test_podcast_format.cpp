@@ -32,7 +32,34 @@ TEST(the_episode_counts_say_the_new_ones_only_when_there_are) {
     CHECK(formatEpisodeCounts(42, 3) == "42 episodes · 3 new");
 }
 
+TEST(the_speed_reads_with_the_digits_that_count) {
+    CHECK(formatPlaybackSpeed(1.0f) == "1x");
+    CHECK(formatPlaybackSpeed(1.25f) == "1.25x");
+    CHECK(formatPlaybackSpeed(1.5f) == "1.5x");
+    CHECK(formatPlaybackSpeed(0.5f) == "0.5x");
+    CHECK(formatPlaybackSpeed(2.0f) == "2x");
+}
+
+TEST(the_speed_steps_by_a_quarter_between_half_and_double) {
+    CHECK(stepPlaybackSpeed(1.0f, 1) == 1.25f);
+    CHECK(stepPlaybackSpeed(1.0f, -1) == 0.75f);
+    CHECK(stepPlaybackSpeed(2.0f, 1) == 2.0f);
+    CHECK(stepPlaybackSpeed(0.5f, -1) == 0.5f);
+    // A speed that the player set between two steps snaps to the grid
+    CHECK(stepPlaybackSpeed(1.1f, 1) == 1.25f);
+}
+
+TEST(a_publication_date_names_the_day) {
+    CHECK(formatPublishedDate(0).empty());
+    const std::string text = formatPublishedDate(1700000000);
+    CHECK(text.rfind("Published ", 0) == 0);
+    CHECK(text.size() == 16);
+}
+
 int main() {
+    RUN(the_speed_reads_with_the_digits_that_count);
+    RUN(the_speed_steps_by_a_quarter_between_half_and_double);
+    RUN(a_publication_date_names_the_day);
     RUN(a_date_reads_as_a_time_ago);
     RUN(an_old_date_reads_as_a_month_and_a_day);
     RUN(an_unknown_date_is_empty_and_a_future_one_is_today);

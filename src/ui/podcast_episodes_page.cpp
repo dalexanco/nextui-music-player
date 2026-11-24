@@ -4,11 +4,10 @@
 #include <string>
 #include <vector>
 
-#include "background.h"
-#include "module_podcast.h"
+#include <functional>
 #include "podcast.h"
 #include "toast.h"
-#include "ui/podcast_legacy_page.hpp"
+#include "ui/podcast_playing_page.hpp"
 #include "ui/wifi_dialog_page.hpp"
 
 namespace {
@@ -19,7 +18,10 @@ constexpr int kMaxEpisodes = 2000;
 /** The episodes of a subscription, read once into briefs: the rows must not read the file again. */
 class PodcastEpisodesSource final : public SubListSource {
 public:
-    explicit PodcastEpisodesSource(int feedIndex) : feedIndex(feedIndex), briefs(kMaxEpisodes) { read(); }
+    PodcastEpisodesSource(int feedIndex, std::function<void(int)> onPick)
+        : feedIndex(feedIndex), onPick(std::move(onPick)), briefs(kMaxEpisodes) {
+        read();
+    }
 
     int getCount() const override { return count; }
 
@@ -111,12 +113,13 @@ public:
             Toast_show(Podcast_cancelEpisodeDownload(feed->feed_url, brief.guid) == 0 ? "Download cancelled" : "Cancel failed", TOAST_DURATION);
             localVersion++;
         } else if (Podcast_episodeFileExists(feed, index)) {
-            if (isPlaying(index)) {
-                // The episode plays already: its player opens again
-                navigator.open(PodcastLegacyPage{PODCAST_ENTRY_PLAYER});
-            } else {
-                navigator.open(PodcastLegacyPage{PODCAST_ENTRY_PLAY, feedIndex, index});
+            if (onPick) {
+                // The player that opened the list takes the episode
+                if (!isPlaying(index)) onPick(index);
+                return true;
             }
+            // An episode that plays already gets its player back
+            navigator.open(isPlaying(index) ? PodcastPlayingPage{} : PodcastPlayingPage{feedIndex, index});
         } else {
             const std::string guid = brief.guid;
             navigator.openForResult(WifiDialogPage{}, [this, guid](const bool& connected) {
@@ -189,6 +192,7 @@ private:
     }
 
     int feedIndex;
+    std::function<void(int)> onPick;
     std::vector<PodcastEpisodeBrief> briefs;
     int count = 0;
     long localVersion = 0;
@@ -196,8 +200,8 @@ private:
 
 }  // namespace
 
-SubListPage makePodcastEpisodesPage(int feedIndex) {
+SubListPage makePodcastEpisodesPage(int feedIndex, std::function<void(int)> onPick) {
     const PodcastFeed* feed = Podcast_getSubscription(feedIndex);
     return SubListPage(feed ? feed->title : "Episodes", "EPISODES", "PLAY", THEME_SOURCE_PODCAST,
-                       std::make_shared<PodcastEpisodesSource>(feedIndex), HELP_PODCAST_EPISODES);
+                       std::make_shared<PodcastEpisodesSource>(feedIndex, std::move(onPick)), HELP_PODCAST_EPISODES);
 }

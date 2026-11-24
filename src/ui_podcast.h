@@ -18,7 +18,7 @@ typedef enum {
 } PodcastManageMenuItem;
 
 // The lists, the summaries and the queues of the podcasts. The playing screen
-// is in ui_podcast_playing.h.
+// is the native page ui/podcast_playing_page.*.
 
 // Render redesigned podcast main page (continue listening + subscriptions)
 void render_podcast_main_page(SDL_Surface* screen, int show_setting,

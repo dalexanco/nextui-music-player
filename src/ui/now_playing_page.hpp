@@ -6,8 +6,8 @@
 #include "ui/page/ui_page.hpp"
 
 /**
- * The Now Playing row of Main: the native player while the music plays, and the legacy module of
- * the podcast otherwise. Closes when the screen closes.
+ * The Now Playing row of Main: the native player of the source that plays (music, radio or
+ * podcast). Closes at once when nothing plays.
  */
 class NowPlayingPage final : public UiPage {
 public:

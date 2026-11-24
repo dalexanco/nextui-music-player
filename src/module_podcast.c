@@ -9,13 +9,12 @@
 #include "toast.h"
 #include "module_podcast.h"
 #include "podcast.h"
+#include "podcast_sleep.h"
 #include "player.h"
 #include "keyboard.h"
 #include "display_helper.h"
 #include "ui_podcast.h"
-#include "ui_podcast_playing.h"
 #include "ui_layers.h"
-#include "spectrum.h"
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "wifi.h"
@@ -28,25 +27,10 @@ typedef enum {
     PODCAST_INTERNAL_MANAGE,
     PODCAST_INTERNAL_TOP_SHOWS,
     PODCAST_INTERNAL_SEARCH_RESULTS,
-    PODCAST_INTERNAL_EPISODES,
-    PODCAST_INTERNAL_SEEKING,
-    PODCAST_INTERNAL_PLAYING,
     PODCAST_INTERNAL_DOWNLOAD_QUEUE
 } PodcastInternalState;
 
 // Module state
-// Home and Episodes keep `scroll` in PIXELS, not rows - their renderers lay out
-// section headers and an info panel between the items, so the window cannot be
-// expressed as a row index. .external_scroll keeps ListNav off .scroll; the
-// pixel offset lives in the plain int below, owned by the renderer.
-static ListNav podcast_menu_nav = {
-    .selected        = 0,
-    .scroll          = 0,
-    .count           = 0,
-    .items_per_page  = 1,
-    .external_scroll = true,
-};
-static int podcast_menu_scroll_px = 0;   // pixels
 static ListNav podcast_manage_nav = {
     .selected       = 0,
     .scroll         = 0,
@@ -66,16 +50,6 @@ static ListNav podcast_search_nav = {
     .items_per_page = 1,
 };
 static char podcast_search_query[256] = "";
-static ListNav podcast_episodes_nav = {
-    .selected        = 0,
-    .scroll          = 0,
-    .count           = 0,
-    .items_per_page  = 1,
-    .external_scroll = true,
-};
-static int podcast_episodes_scroll_px = 0;   // pixels
-static int podcast_current_feed_index = -1;
-static int podcast_current_episode_index = -1;
 // Guid of the item under the queue cursor, remembered across frames: the worker
 // compacts COMPLETE and FAILED items out of wherever they sat, so a count delta
 // alone cannot say how far the selection shifted.
@@ -87,31 +61,9 @@ static ListNav podcast_queue_nav = {
     .count          = 0,
     .items_per_page = 1,
 };
-// The "Resuming..." message shown for as long as a seek takes. Screen-bound so
-// that leaving the module mid-seek cannot carry it onto the next screen.
-static ToastToken seek_toast = TOAST_TOKEN_NONE;
-
-// Announce the position playback is being resumed at.
-static void show_seek_toast(int feed_index, int episode_index) {
-    PodcastEpisode* ep = Podcast_getEpisode(feed_index, episode_index);
-    char msg[64];
-    if (ep && ep->progress_sec > 0) {
-        char position[16];
-        Podcast_formatDuration(position, ep->progress_sec);
-        snprintf(msg, sizeof(msg), "Resuming at %s...", position);
-    } else {
-        snprintf(msg, sizeof(msg), "Resuming...");
-    }
-    seek_toast = Toast_showScreenBound(msg, TOAST_DURATION_FOREVER);
-}
 
 // Periodic progress saving
-static uint32_t last_progress_save_time = 0;
 #define PROGRESS_SAVE_INTERVAL_MS 30000  // 30 seconds
-
-// The seek of a short press of LEFT (back) and RIGHT (forward)
-#define PODCAST_SEEK_BACK_MS    10000
-#define PODCAST_SEEK_FORWARD_MS 30000
 
 // Confirmation dialog state
 static bool show_confirm = false;
@@ -119,74 +71,12 @@ static int confirm_target_index = -1;
 static char confirm_podcast_name[256] = "";
 static int confirm_return_state = 0;  // 0 = menu, 1 = top_shows, 2 = search_results
 
-// Screen off state
-static bool screen_off = false;
-
-// Set for the run of the module that a native page started
-static bool started_by_page = false;
-
-// Handle USB/Bluetooth media button events
-static void handle_hid_events(void) {
-    USBHIDEvent hid_event;
-    while ((hid_event = Player_pollUSBHID()) != USB_HID_EVENT_NONE) {
-        if (hid_event == USB_HID_EVENT_PLAY_PAUSE) {
-            if (Player_getState() == PLAYER_STATE_PAUSED) Player_play();
-            else Player_pause();
-        } else {
-            ModuleCommon_handleHIDVolume(hid_event);
-        }
-    }
-}
-
-// The layers of the playing screen, once for each frame of the loop. A frame
-// that redraws the screen paints them after that redraw, thus this one leaves
-// them to the render block.
-static void refresh_gpu_layers(int* dirty) {
-    if (ModuleCommon_isScreenOffHintActive()) return;
-    if (PodcastPlaying_frame(*dirty != 0)) *dirty = 1;
-}
-
-// A display recreate drops every GPU layer. The next frame paints each one
-// again, whatever the caches of the screen say.
-static void display_recreated(void) {
-    PodcastPlaying_invalidate();
-    // A new display is on and has no content
-    screen_off = false;
-}
-
-// The screen goes dark after the hint, thus its layers go now and the hint
-// takes the surface. The frame presents at the end of the pass.
-static void clear_and_show_screen_off_hint(SDL_Surface *screen) {
-    PodcastPlaying_leave();
-    GFX_clear(screen);
-    render_screen_off_hint(screen);
-    ModuleCommon_markSurfaceDrawn();
-}
-
-static void return_to_episodes(PodcastInternalState *state, int *dirty) {
-    Podcast_flushProgress();
-    PodcastPlaying_leave();
-    Toast_dismiss(seek_toast);
-    ModuleCommon_setAutosleepDisabled(false);
-    // The keys lock the playback only
-    ModuleCommon_resetScreenOffHint();
-    podcast_episodes_nav.selected = podcast_current_episode_index;
-    // A page that started the module has its own list of episodes
-    *state = started_by_page ? PODCAST_INTERNAL_MENU : PODCAST_INTERNAL_EPISODES;
-    *dirty = 1;
-}
-
-
 // Where the next run of the module starts. The native pages start it on one screen and take the
 // screen back when the module returns to its menu.
-static PodcastEntry next_entry = PODCAST_ENTRY_MENU;
-static int next_entry_arg = 0;
-static int next_entry_arg2 = 0;
+static PodcastEntry next_entry = PODCAST_ENTRY_MANAGE;
 
-void PodcastModule_setEntry(PodcastEntry entry, int arg, int arg2) {
+void PodcastModule_setEntry(PodcastEntry entry) {
     next_entry = entry;
-    next_entry_arg = arg;
-    next_entry_arg2 = arg2;
 }
 
 void PodcastModule_autoRefresh(void) {
@@ -198,151 +88,32 @@ void PodcastModule_autoRefresh(void) {
     }
 }
 
-// Loads the downloaded episode `episode_index` of the subscription `feed_index` and seeks to its
-// saved position. `state` goes to SEEKING or PLAYING. Returns false (with a toast) on a failure.
-static bool start_episode(int feed_index, int episode_index, PodcastInternalState* state) {
-    PodcastFeed* feed = Podcast_getSubscription(feed_index);
-    PodcastEpisode* ep = Podcast_getEpisode(feed_index, episode_index);
-    if (!feed || !ep || !Podcast_episodeFileExists(feed, episode_index)) {
-        Toast_show("Episode not available", TOAST_DURATION);
-        return false;
-    }
-    Background_stopAll();
-    podcast_current_feed_index = feed_index;
-    podcast_current_episode_index = episode_index;
-    int load_result = Podcast_loadAndSeek(feed, episode_index);
-    if (load_result < 0) {
-        Toast_show("Failed to play", TOAST_DURATION);
-        return false;
-    }
-    // Clear new flag only when actually playing
-    Podcast_clearNewFlag(feed_index, episode_index);
-    Podcast_clearTitleScroll();
-    ModuleCommon_recordInputTime();
-    last_progress_save_time = SDL_GetTicks();
-    Podcast_updateContinueListening(feed->feed_url, feed->feed_id,
-        ep->guid, ep->title, feed->title, feed->artwork_url);
-    if (load_result == 1) {
-        // Has saved progress — seeking, show player UI while waiting
-        show_seek_toast(feed_index, episode_index);
-        *state = PODCAST_INTERNAL_SEEKING;
-    } else {
-        // No saved progress — play immediately
-        Player_play();
-        *state = PODCAST_INTERNAL_PLAYING;
-    }
-    return true;
-}
-
-// Plays the episode of an entry of Continue Listening: loads it, seeks to its saved position.
-// Returns false (with a toast) where the episode cannot play, thus `state` stays as it is.
-static bool start_continue_listening(int cl_index, PodcastInternalState* state) {
-    ContinueListeningEntry* cl_entry = Podcast_getContinueListening(cl_index);
-    if (!cl_entry) return false;
-    int fi = Podcast_findFeedIndex(cl_entry->feed_url);
-    if (fi < 0) {
-        Toast_show("Podcast not found", TOAST_DURATION);
-        return false;
-    }
-    PodcastFeed* feed = Podcast_getSubscription(fi);
-    // Find episode index by guid
-    int ep_idx = -1;
-    if (feed) {
-        for (int e = 0; e < feed->episode_count; e++) {
-            PodcastEpisode* ep = Podcast_getEpisode(fi, e);
-            if (ep && strcmp(ep->guid, cl_entry->episode_guid) == 0) {
-                ep_idx = e;
-                break;
-            }
-        }
-    }
-    if (!feed || ep_idx < 0 || !Podcast_episodeFileExists(feed, ep_idx)) {
-        Toast_show("Episode not available", TOAST_DURATION);
-        return false;
-    }
-    Background_stopAll();
-    podcast_current_feed_index = fi;
-    podcast_current_episode_index = ep_idx;
-    int load_result = Podcast_loadAndSeek(feed, ep_idx);
-    if (load_result < 0) {
-        Toast_show("Failed to play", TOAST_DURATION);
-        return false;
-    }
-    Podcast_clearTitleScroll();
-    ModuleCommon_recordInputTime();
-    last_progress_save_time = SDL_GetTicks();
-    if (load_result == 1) {
-        show_seek_toast(fi, ep_idx);
-        *state = PODCAST_INTERNAL_SEEKING;
-    } else {
-        Player_play();
-        *state = PODCAST_INTERNAL_PLAYING;
-    }
-    // Update continue listening (move to top)
-    Podcast_updateContinueListening(feed->feed_url, feed->feed_id,
-        cl_entry->episode_guid, cl_entry->episode_title,
-        feed->title, feed->artwork_url);
-    return true;
-}
-
 ModuleExitReason PodcastModule_run(DisplayContext* display) {
     Podcast_init();
-    DisplayHelper_addRecreatedCallback(display_recreated);
     PodcastModule_autoRefresh();
 
     const PodcastEntry entry = next_entry;
-    const int entry_arg = next_entry_arg;
-    const int entry_arg2 = next_entry_arg2;
-    next_entry = PODCAST_ENTRY_MENU;
-    next_entry_arg = 0;
-    next_entry_arg2 = 0;
-    started_by_page = (entry != PODCAST_ENTRY_MENU);
+    next_entry = PODCAST_ENTRY_MANAGE;
 
-    PodcastInternalState state = PODCAST_INTERNAL_MENU;
+    PodcastInternalState state = PODCAST_INTERNAL_MANAGE;
     ModuleExitReason reason = MODULE_EXIT_TO_MENU;
     int dirty = 1;
     int show_setting = 0;
 
     ScreenTitle_start(false);
-    screen_off = false;
     ModuleCommon_resetScreenOffHint();
     ModuleCommon_recordInputTime();
     show_confirm = false;
-    ListNav_scrollToTop(&podcast_menu_nav);
-    podcast_menu_scroll_px = 0;
 
-    // Re-enter playing state if podcast is playing in background
-    if ((entry == PODCAST_ENTRY_MENU || entry == PODCAST_ENTRY_PLAYER)
-        && Background_getActive() == BG_PODCAST && Podcast_isActive()) {
-        Background_setActive(BG_NONE);
-        ModuleCommon_setAutosleepDisabled(true);
-        state = PODCAST_INTERNAL_PLAYING;
-    } else if (entry == PODCAST_ENTRY_PLAY) {
-        start_episode(entry_arg, entry_arg2, &state);
-    } else if (entry == PODCAST_ENTRY_MANAGE) {
-        ListNav_scrollToTop(&podcast_manage_nav);
-        state = PODCAST_INTERNAL_MANAGE;
-    } else if (entry == PODCAST_ENTRY_QUEUE) {
+    if (entry == PODCAST_ENTRY_QUEUE) {
         ListNav_scrollToTop(&podcast_queue_nav);
         state = PODCAST_INTERNAL_DOWNLOAD_QUEUE;
-    } else if (entry == PODCAST_ENTRY_CONTINUE) {
-        // A failed start leaves the state on the menu, which returns to the native page below
-        if (start_continue_listening(entry_arg, &state)) Background_setActive(BG_NONE);
+    } else {
+        ListNav_scrollToTop(&podcast_manage_nav);
     }
-
-    // The spectrum belongs to the playing screen alone. One check of the state
-    // covers each way into that screen and each way out of it.
-    PodcastInternalState spectrum_state = state;
-    if (state == PODCAST_INTERNAL_PLAYING) Spectrum_init();
 
     while (1) {
         ModuleCommon_frameBegin(true);
-
-        if (state != spectrum_state) {
-            if (state == PODCAST_INTERNAL_PLAYING)          Spectrum_init();
-            else if (spectrum_state == PODCAST_INTERNAL_PLAYING) Spectrum_quit();
-            spectrum_state = state;
-        }
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle confirmation dialog
@@ -378,23 +149,19 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
         // before it reads any input, thus the screen-off states keep their
         // behavior.
         if (ModuleCommon_stopSignalled()
-            || (!screen_off && !ModuleCommon_isScreenOffHintActive())) {
+            || !ModuleCommon_isScreenOffHintActive()) {
             HelpId help_id;
             switch (state) {
                 case PODCAST_INTERNAL_MENU:           help_id = HELP_PODCAST_MENU;           break;
                 case PODCAST_INTERNAL_MANAGE:         help_id = HELP_PODCAST_MANAGE;         break;
                 case PODCAST_INTERNAL_TOP_SHOWS:      help_id = HELP_PODCAST_TOP_SHOWS;      break;
                 case PODCAST_INTERNAL_SEARCH_RESULTS: help_id = HELP_PODCAST_SEARCH_RESULTS; break;
-                case PODCAST_INTERNAL_EPISODES:       help_id = HELP_PODCAST_EPISODES;       break;
-                case PODCAST_INTERNAL_SEEKING:        help_id = HELP_PODCAST_PLAYING;        break;
-                case PODCAST_INTERNAL_PLAYING:        help_id = HELP_PODCAST_PLAYING;        break;
                 case PODCAST_INTERNAL_DOWNLOAD_QUEUE: help_id = HELP_PODCAST_DOWNLOADS;      break;
                 default:                              help_id = HELP_PODCAST_MENU;           break;
             }
 
             GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
             if (global.should_quit) {
-                Spectrum_quit();
                 Podcast_cleanup();
                 reason = MODULE_EXIT_QUIT;
                 break;
@@ -407,104 +174,9 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
         }
 
         // =========================================
-        // PODCAST MENU STATE (unified: continue listening + subscriptions)
-        // =========================================
-        if (state == PODCAST_INTERNAL_MENU) {
-            Podcast_update();
-
-            // Check for background refresh completion
-            if (Podcast_checkRefreshCompleted()) {
-                Podcast_saveSubscriptions();
-                dirty = 1;
-            }
-
-            int cl_count_raw = Podcast_getContinueListeningCount();
-            int cl_count = (cl_count_raw > PODCAST_CONTINUE_LISTENING_DISPLAY) ? PODCAST_CONTINUE_LISTENING_DISPLAY : cl_count_raw;
-            int sub_count = Podcast_getSubscriptionCount();
-            // "Downloads" item at the bottom (only visible when there are queued items)
-            int dl_queue_count = 0;
-            Podcast_getDownloadQueue(&dl_queue_count);
-            int has_downloads_item = (dl_queue_count > 0) ? 1 : 0;
-            int total = cl_count + sub_count + has_downloads_item;
-            podcast_menu_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
-
-            // Items change underneath the cursor (the Downloads row appears and
-            // disappears with the queue), so reconcile before reading it.
-            // The Downloads row comes and goes with the queue, so the row count
-            // can change without the cursor moving.
-            if (podcast_menu_nav.count != total) dirty = 1;
-            if (ListNav_reconcile(&podcast_menu_nav, total).moved) dirty = 1;
-
-            if (has_downloads_item) dirty = 1;  // Force redraw to update download status
-            if (Podcast_isTitleScrolling()) Podcast_animateTitleScroll();
-            if (Podcast_titleScrollNeedsRender()) dirty = 1;
-            if (Podcast_loadPendingThumbnails()) dirty = 1;
-
-            if (ListNav_step(&podcast_menu_nav, ListNavPad_read()).moved) {
-                Podcast_clearTitleScroll();
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_A) && total > 0) {
-                if (has_downloads_item && podcast_menu_nav.selected == cl_count + sub_count) {
-                    // Downloads item — open download queue
-                    ListNav_scrollToTop(&podcast_queue_nav);
-                    Podcast_clearTitleScroll();
-                    state = PODCAST_INTERNAL_DOWNLOAD_QUEUE;
-                    dirty = 1;
-                } else if (podcast_menu_nav.selected < cl_count) {
-                    // Continue Listening item — play directly
-                    start_continue_listening(podcast_menu_nav.selected, &state);
-                } else {
-                    // Subscription item — go to episodes
-                    podcast_current_feed_index = podcast_menu_nav.selected - cl_count;
-                    ListNav_scrollToTop(&podcast_episodes_nav);
-                    podcast_episodes_scroll_px = 0;
-                    Podcast_clearTitleScroll();
-                    state = PODCAST_INTERNAL_EPISODES;
-                }
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_X) && total > 0) {
-                // Only allow unsubscribe on subscription items (not Downloads item)
-                if (podcast_menu_nav.selected >= cl_count && podcast_menu_nav.selected < cl_count + sub_count) {
-                    int sub_idx = podcast_menu_nav.selected - cl_count;
-                    PodcastFeed* feed = Podcast_getSubscription(sub_idx);
-                    if (feed) {
-                        strncpy(confirm_podcast_name, feed->title, sizeof(confirm_podcast_name) - 1);
-                        confirm_podcast_name[sizeof(confirm_podcast_name) - 1] = '\0';
-                        confirm_target_index = sub_idx;
-                        confirm_return_state = 0;
-                        Podcast_clearTitleScroll();
-                        show_confirm = true;
-                        dirty = 1;
-                    }
-                }
-            }
-            else if (PAD_justPressed(BTN_Y)) {
-                ListNav_scrollToTop(&podcast_manage_nav);
-                Podcast_clearTitleScroll();
-                state = PODCAST_INTERNAL_MANAGE;
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_B)) {
-                Podcast_clearTitleScroll();
-                if (Podcast_isActive() || Podcast_isDownloading()) {
-                    Podcast_saveSubscriptions();
-                    Podcast_flushProgress();
-                    if (Podcast_isActive()) {
-                        Background_setActive(BG_PODCAST);
-                    }
-                } else {
-                    Podcast_cleanup();
-                }
-                Spectrum_quit();
-                break;
-            }
-        }
-        // =========================================
         // MANAGE STATE
         // =========================================
-        else if (state == PODCAST_INTERNAL_MANAGE) {
+        if (state == PODCAST_INTERNAL_MANAGE) {
             Podcast_update();
             podcast_manage_nav.items_per_page = calc_list_layout(screen).items_per_page;
 
@@ -696,110 +368,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
             }
         }
         // =========================================
-        // EPISODES STATE
-        // =========================================
-        else if (state == PODCAST_INTERNAL_EPISODES) {
-            PodcastFeed* feed = Podcast_getSubscription(podcast_current_feed_index);
-            int count = feed ? feed->episode_count : 0;
-            podcast_episodes_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
-
-            // Check if refresh just completed
-            if (Podcast_checkRefreshCompleted()) {
-                feed = Podcast_getSubscription(podcast_current_feed_index);
-                count = feed ? feed->episode_count : 0;
-                Podcast_invalidateEpisodeCache();
-                if (feed && feed->new_episode_count > 0) {
-                    char msg[64];
-                    snprintf(msg, sizeof(msg), "%d new episode%s found!", feed->new_episode_count,
-                             feed->new_episode_count > 1 ? "s" : "");
-                    Toast_show(msg, TOAST_DURATION);
-                } else {
-                    Toast_show("Already up to date", TOAST_DURATION);
-                }
-                Podcast_saveSubscriptions();
-                dirty = 1;
-            }
-
-            // Force redraw when downloads active
-            int queue_count = 0;
-            PodcastDownloadItem* queue = Podcast_getDownloadQueue(&queue_count);
-            for (int i = 0; i < queue_count; i++) {
-                if (queue[i].status == PODCAST_DOWNLOAD_DOWNLOADING || queue[i].status == PODCAST_DOWNLOAD_PENDING) {
-                    dirty = 1;
-                    break;
-                }
-            }
-
-            if (Podcast_isTitleScrolling()) Podcast_animateTitleScroll();
-            if (Podcast_titleScrollNeedsRender()) dirty = 1;
-
-            if (ListNav_reconcile(&podcast_episodes_nav, count).moved) dirty = 1;
-            if (ListNav_step(&podcast_episodes_nav, ListNavPad_read()).moved) {
-                Podcast_clearTitleScroll();
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_A) && count > 0 && feed) {
-                podcast_current_episode_index = podcast_episodes_nav.selected;
-                PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_current_episode_index);
-
-                if (ep) {
-                    int dl_progress = 0;
-                    int dl_status = Podcast_getEpisodeDownloadStatus(feed->feed_url, ep->guid, &dl_progress);
-
-                    if (dl_status == PODCAST_DOWNLOAD_DOWNLOADING || dl_status == PODCAST_DOWNLOAD_PENDING) {
-                        // Cancel download
-                        Toast_show(Podcast_cancelEpisodeDownload(feed->feed_url, ep->guid) == 0
-                                       ? "Download cancelled" : "Cancel failed", TOAST_DURATION);
-                    } else if (Podcast_episodeFileExists(feed, podcast_current_episode_index)) {
-                        start_episode(podcast_current_feed_index, podcast_current_episode_index, &state);
-                    } else {
-                        if (!Wifi_ensureConnected(screen, show_setting)) {
-                            Toast_show("No network connection", TOAST_DURATION);
-                        } else if (Podcast_queueDownload(feed, podcast_current_episode_index) == 0) {
-                            Toast_show("Downloading...", TOAST_DURATION);
-                        } else {
-                            Toast_show("Download failed", TOAST_DURATION);
-                        }
-                    }
-                }
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_X) && count > 0 && feed) {
-                PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_episodes_nav.selected);
-                if (ep) {
-                    // Toggle played status
-                    if (ep->progress_sec == -1) {
-                        ep->progress_sec = 0;
-                        Podcast_saveProgress(feed->feed_url, ep->guid, 0);
-                        Toast_show("Marked as unplayed", TOAST_DURATION);
-                    } else {
-                        ep->progress_sec = -1;
-                        Podcast_markAsPlayed(feed->feed_url, ep->guid);
-                        Podcast_removeContinueListening(feed->feed_url, ep->guid);
-                        Toast_show("Marked as played", TOAST_DURATION);
-                    }
-                    Podcast_flushProgress();
-                }
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_Y) && feed) {
-                if (Podcast_isRefreshing()) {
-                    Toast_show("Already refreshing...", TOAST_DURATION);
-                } else if (!Wifi_ensureConnected(screen, show_setting)) {
-                    Toast_show("No network connection", TOAST_DURATION);
-                } else {
-                    Podcast_startRefreshFeed(podcast_current_feed_index);
-                    Toast_show("Checking for new episodes...", TOAST_DURATION);
-                }
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_B)) {
-                Podcast_clearTitleScroll();
-                state = PODCAST_INTERNAL_MENU;
-                dirty = 1;
-            }
-        }
-        // =========================================
         // DOWNLOAD QUEUE STATE
         // =========================================
         else if (state == PODCAST_INTERNAL_DOWNLOAD_QUEUE) {
@@ -876,222 +444,27 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 dirty = 1;
             }
         }
-        // =========================================
-        // SEEKING STATE (resuming to saved position)
-        // =========================================
-        else if (state == PODCAST_INTERNAL_SEEKING) {
-            ModuleCommon_setAutosleepDisabled(true);
 
-            if (!Player_resume()) {
-                // Seek complete — start playback
-                Player_play();
-                Toast_dismiss(seek_toast);
-                ModuleCommon_recordInputTime();
-                last_progress_save_time = SDL_GetTicks();
-                state = PODCAST_INTERNAL_PLAYING;
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_B)) {
-                // Cancel seeking — stop and go back
-                Podcast_stop();
-                return_to_episodes(&state, &dirty);
-                continue;
-            }
-
-            dirty = 1;  // Keep refreshing to show seeking status
-        }
-        // =========================================
-        // PLAYING STATE
-        // =========================================
-        else if (state == PODCAST_INTERNAL_PLAYING) {
-            ModuleCommon_setAutosleepDisabled(true);
-
-            // Handle screen off hint
-            if (ModuleCommon_isScreenOffHintActive()) {
-                handle_hid_events();
-                Podcast_update();
-
-                // SELECT+A during hint -> full wake
-                if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
-                    ModuleCommon_resetScreenOffHint();
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
-                    continue;
-                } else {
-                    // Any other button resets the hint timer
-                    if (PAD_anyPressed()) {
-                        ModuleCommon_startScreenOffHint();
-                    }
-                    if (ModuleCommon_processScreenOffHintTimeout()) {
-                        screen_off = true;
-                        GFX_clear(screen);
-                        ModuleCommon_markSurfaceDrawn();
-                    }
-                    ModuleCommon_frameEnd(screen);
-                    continue;
-                }
-            }
-            else if (screen_off) {
-                handle_hid_events();
-                Podcast_update();
-
-                // Any button -> show hint
-                if (PAD_anyPressed()) {
-                    screen_off = false;
-                    PLAT_enableBacklight(1);
-                    ModuleCommon_startScreenOffHint();
-                    GFX_clear(screen);
-                    render_screen_off_hint(screen);
-                    ModuleCommon_markSurfaceDrawn();
-                }
-                ModuleCommon_frameEnd(screen);
-                continue;
-            }
-            else {
-                bool key_locked = ModuleCommon_isKeyLocked();
-                if (!key_locked && ModuleCommon_updateSeekScan(PODCAST_SEEK_BACK_MS, PODCAST_SEEK_FORWARD_MS)) {
-                    dirty = 1;
-                }
-
-                if (key_locked) {
-                    // the screen draws, and the keys do nothing
-                }
-                else if (PAD_justPressed(BTN_A)) {
-                    if (Player_getState() == PLAYER_STATE_PAUSED) Player_play();
-                    else Player_pause();
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
-                }
-                else if (PAD_justPressed(BTN_L3) || PAD_justPressed(BTN_L2)) {
-                    Spectrum_cycleNext();
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
-                }
-                else if (PAD_justPressed(BTN_B)) {
-                    if (Player_getState() == PLAYER_STATE_PLAYING) {
-                        // Playing — let audio continue in background
-                        Podcast_flushProgress();
-                        PodcastPlaying_leave();
-                        podcast_episodes_nav.selected = podcast_current_episode_index;
-                        state = started_by_page ? PODCAST_INTERNAL_MENU : PODCAST_INTERNAL_EPISODES;
-                        dirty = 1;
-                    } else {
-                        // Paused — stop and go back normally
-                        Podcast_stop();
-                        return_to_episodes(&state, &dirty);
-                        continue;
-                    }
-                }
-                else if (PAD_tappedSelect(SDL_GetTicks())) {
-                    ModuleCommon_startScreenOffHint();
-                    if (!ModuleCommon_shouldDrawContentWhileLocked()) {
-                        clear_and_show_screen_off_hint(screen);
-                        ModuleCommon_frameEnd(screen);
-                        continue;
-                    }
-                }
-                else if (PAD_justPressed(BTN_UP)) {
-                    float speed = Player_getPlaybackSpeed();
-                    speed += 0.25f;
-                    if (speed > 2.0f) speed = 2.0f;
-                    Player_setPlaybackSpeed(speed);
-                    char msg[32];
-                    snprintf(msg, sizeof(msg), "Speed: %.2gx", speed);
-                    Toast_show(msg, TOAST_DURATION);
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
-                }
-                else if (PAD_justPressed(BTN_DOWN)) {
-                    float speed = Player_getPlaybackSpeed();
-                    speed -= 0.25f;
-                    if (speed < 0.5f) speed = 0.5f;
-                    Player_setPlaybackSpeed(speed);
-                    char msg[32];
-                    snprintf(msg, sizeof(msg), "Speed: %.2gx", speed);
-                    Toast_show(msg, TOAST_DURATION);
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
-                }
-
-                Podcast_update();
-                refresh_gpu_layers(&dirty);
-
-                // Periodic progress saving (every 30 seconds)
-                {
-                    uint32_t now = SDL_GetTicks();
-                    if (Podcast_isActive() && now - last_progress_save_time >= PROGRESS_SAVE_INTERVAL_MS) {
-                        PodcastFeed* feed = Podcast_getSubscription(podcast_current_feed_index);
-                        if (feed) {
-                            PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_current_episode_index);
-                            if (ep) {
-                                int position = Player_getPosition();
-                                if (position > 0) {
-                                    ep->progress_sec = position / 1000;
-                                    Podcast_saveProgress(feed->feed_url, ep->guid, ep->progress_sec);
-                                    Podcast_flushProgress();
-                                }
-                            }
-                        }
-                        last_progress_save_time = now;
-                    }
-                }
-
-                // Detect episode end (player stopped naturally)
-                if (Player_getState() == PLAYER_STATE_STOPPED) {
-                    PodcastFeed* feed = Podcast_getSubscription(podcast_current_feed_index);
-                    PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_current_episode_index);
-                    char saved_feed_url[PODCAST_MAX_URL] = "";
-                    char saved_guid[PODCAST_MAX_GUID] = "";
-                    if (feed && ep) {
-                        strncpy(saved_feed_url, feed->feed_url, PODCAST_MAX_URL - 1);
-                        strncpy(saved_guid, ep->guid, PODCAST_MAX_GUID - 1);
-                    }
-
-                    Podcast_stop();
-
-                    if (saved_feed_url[0] && saved_guid[0]) {
-                        Podcast_markAsPlayed(saved_feed_url, saved_guid);
-                        Podcast_removeContinueListening(saved_feed_url, saved_guid);
-                    }
-                    if (ep) ep->progress_sec = -1;
-
-                    return_to_episodes(&state, &dirty);
-                    continue;
-                }
-
-                // Auto screen-off
-                if (Podcast_isActive() && ModuleCommon_checkAutoScreenOffTimeout()) {
-                    clear_and_show_screen_off_hint(screen);
-                    ModuleCommon_frameEnd(screen);
-                    continue;
-                }
-            }
-        }
-
-        // A module that a native page started gives the screen back at its menu
-        if (state == PODCAST_INTERNAL_MENU && entry != PODCAST_ENTRY_MENU) {
+        // The module gives the screen back to the page that started it
+        if (state == PODCAST_INTERNAL_MENU) {
             Podcast_clearTitleScroll();
             Podcast_saveSubscriptions();
-            Podcast_flushProgress();
-            if (Podcast_isActive()) Background_setActive(BG_PODCAST);
-            Spectrum_quit();
             break;
         }
 
         // Handle power management
-        if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
+        if (!ModuleCommon_isScreenOffHintActive()) {
             ModuleCommon_PWR_update(&dirty, &show_setting);
         }
 
         // Render
-        if (dirty && !screen_off) {
+        if (dirty) {
             if (ModuleCommon_isScreenOffHintActive()) {
                 GFX_clear(screen);
                 render_screen_off_hint(screen);
             } else {
                 switch (state) {
                     case PODCAST_INTERNAL_MENU:
-                        render_podcast_main_page(screen, show_setting, podcast_menu_nav.selected, &podcast_menu_scroll_px);
                         break;
                     case PODCAST_INTERNAL_MANAGE:
                         render_podcast_manage(screen, show_setting, podcast_manage_nav.selected,
@@ -1103,39 +476,23 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     case PODCAST_INTERNAL_SEARCH_RESULTS:
                         render_podcast_search_results(screen, show_setting, podcast_search_nav.selected, &podcast_search_nav.scroll);
                         break;
-                    case PODCAST_INTERNAL_EPISODES:
-                        render_podcast_episodes(screen, show_setting, podcast_current_feed_index, podcast_episodes_nav.selected,
-                                                &podcast_episodes_scroll_px);
-                        break;
-                    // The seeking screen is the playing screen, thus it paints
-                    // the same layers. The title of the episode lives on the
-                    // layer, and a seek of a long episode holds this state for
-                    // several seconds.
-                    case PODCAST_INTERNAL_SEEKING:
-                    case PODCAST_INTERNAL_PLAYING:
-                        render_podcast_playing(screen, show_setting, podcast_current_feed_index, podcast_current_episode_index);
-                        PodcastPlaying_paintLayers();
-                        break;
                     case PODCAST_INTERNAL_DOWNLOAD_QUEUE:
                         render_podcast_download_queue(screen, show_setting, podcast_queue_nav.selected, &podcast_queue_nav.scroll);
                         break;
                 }
             }
 
-            if (show_setting && state != PODCAST_INTERNAL_PLAYING) {
+            if (show_setting) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
             ModuleCommon_markSurfaceDrawn();
             dirty = 0;
         }
-        // The playing screen and the seek that leads to it have no standard header
-        ScreenTitle_frameEnd(&dirty, state != PODCAST_INTERNAL_PLAYING
-                                     && state != PODCAST_INTERNAL_SEEKING && !screen_off);
+        ScreenTitle_frameEnd(&dirty, true);
         ModuleCommon_frameEnd(screen);
     }
 
-    DisplayHelper_removeRecreatedCallback(display_recreated);
     return reason;
 }
 
@@ -1144,32 +501,42 @@ bool PodcastModule_isActive(void) {
     return Podcast_isActive();
 }
 
-// Background tick: detect episode end and save progress while in menu
-void PodcastModule_backgroundTick(void) {
+bool PodcastModule_tickPlayback(void) {
+    static uint32_t last_progress_save_time = 0;
+    static bool tracking = false;
+
     Podcast_update();
+    PodcastSleep_tick();
+
+    const uint32_t now = SDL_GetTicks();
+    if (!tracking) {
+        last_progress_save_time = now;
+        tracking = true;
+    }
+
+    const int feed_index = Podcast_getCurrentFeedIndex();
+    const int episode_index = Podcast_getCurrentEpisodeIndex();
 
     // Periodic progress saving
-    uint32_t now = SDL_GetTicks();
     if (Podcast_isActive() && now - last_progress_save_time >= PROGRESS_SAVE_INTERVAL_MS) {
-        PodcastFeed* feed = Podcast_getSubscription(podcast_current_feed_index);
-        if (feed) {
-            PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_current_episode_index);
-            if (ep) {
-                int position = Player_getPosition();
-                if (position > 0) {
-                    ep->progress_sec = position / 1000;
-                    Podcast_saveProgress(feed->feed_url, ep->guid, ep->progress_sec);
-                    Podcast_flushProgress();
-                }
+        PodcastFeed* feed = Podcast_getSubscription(feed_index);
+        PodcastEpisode* ep = feed ? Podcast_getEpisode(feed_index, episode_index) : NULL;
+        if (ep) {
+            int position = Player_getPosition();
+            if (position > 0) {
+                ep->progress_sec = position / 1000;
+                Podcast_saveProgress(feed->feed_url, ep->guid, ep->progress_sec);
+                Podcast_flushProgress();
             }
         }
         last_progress_save_time = now;
     }
 
-    // Detect episode end
+    // Detect episode end (player stopped naturally)
     if (Player_getState() == PLAYER_STATE_STOPPED) {
-        PodcastFeed* feed = Podcast_getSubscription(podcast_current_feed_index);
-        PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_current_episode_index);
+        tracking = false;
+        PodcastFeed* feed = Podcast_getSubscription(feed_index);
+        PodcastEpisode* ep = feed ? Podcast_getEpisode(feed_index, episode_index) : NULL;
         char saved_feed_url[PODCAST_MAX_URL] = "";
         char saved_guid[PODCAST_MAX_GUID] = "";
         if (feed && ep) {
@@ -1182,9 +549,19 @@ void PodcastModule_backgroundTick(void) {
         if (saved_feed_url[0] && saved_guid[0]) {
             Podcast_markAsPlayed(saved_feed_url, saved_guid);
             Podcast_removeContinueListening(saved_feed_url, saved_guid);
+            // A sleep timer that stopped the playback has no episode to mark: this one ended
         }
         if (ep) ep->progress_sec = -1;
+        Podcast_flushProgress();
+        PodcastSleep_clear();
+        return true;
+    }
+    return false;
+}
 
+// Background tick: detect episode end and save progress while in menu
+void PodcastModule_backgroundTick(void) {
+    if (PodcastModule_tickPlayback()) {
         Background_setActive(BG_NONE);
         ModuleCommon_setAutosleepDisabled(false);
     }
