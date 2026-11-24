@@ -78,6 +78,8 @@ TEST(bestioles_duration_hh_mm_ss) {
 TEST(bestioles_direct_mp3_enclosure) {
     parse_fixture("radiofrance_bestioles.xml");
     CHECK(strncmp(episodes[3].url, "https://media.radiofrance-podcast.net/", 38) == 0);
+    CHECK(strcmp(podcast_enclosure_extension(episodes[3].url), "mp3") == 0);
+    CHECK(strcmp(podcast_enclosure_extension(episodes[0].url), "m4a") == 0);
 }
 
 TEST(odyssees) {
@@ -96,6 +98,19 @@ TEST(rejects_empty_and_garbage) {
     CHECK_EQ_INT(podcast_rss_parse(junk, (int)strlen(junk), &f), -1);
 }
 
+TEST(enclosure_extension) {
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/a/b-27-45.m4a"), "m4a") == 0);
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/a.M4A?provider=public&cu=a.b"), "m4a") == 0);
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/a.mp3#t=10"), "mp3") == 0);
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/ep.opus"), "opus") == 0);
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/episode/42"), "mp3") == 0);
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/ep.php?id=1"), "mp3") == 0);
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/dir.m4a/ep"), "mp3") == 0);
+    CHECK(strcmp(podcast_enclosure_extension("https://x.fr/ep.html"), "mp3") == 0);
+    CHECK(strcmp(podcast_enclosure_extension(""), "mp3") == 0);
+    CHECK(strcmp(podcast_enclosure_extension(NULL), "mp3") == 0);
+}
+
 int main(void) {
     RUN(bestioles_feed_level);
     RUN(bestioles_episodes);
@@ -103,5 +118,6 @@ int main(void) {
     RUN(bestioles_direct_mp3_enclosure);
     RUN(odyssees);
     RUN(rejects_empty_and_garbage);
+    RUN(enclosure_extension);
     return test_summary();
 }

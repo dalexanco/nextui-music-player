@@ -381,6 +381,11 @@ int podcast_rss_parse_with_episodes(const char* xml_data, int xml_len, PodcastFe
                                      PodcastEpisode* episodes_out, int max_episodes,
                                      int* episode_count_out);
 
+// File extension that an enclosure URL names, in lower case and without the dot: "mp3",
+// "m4a", "aac", "ogg", "opus", "wav" or "flac". The player picks its decoder by extension,
+// so a file saved under the wrong one does not play. Anything else gives "mp3".
+const char* podcast_enclosure_extension(const char* url);
+
 #ifdef __cplusplus
 }
 #endif
