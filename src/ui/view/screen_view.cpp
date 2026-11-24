@@ -1,5 +1,8 @@
 #include "ui/view/screen_view.hpp"
 
+#include "ui_fonts.h"
+#include "ui_theme.h"
+
 // The NextUI headers declare C functions and have no guard of their own
 extern "C" {
 #include "defines.h"
@@ -63,6 +66,12 @@ void ScreenView::setScrollingContent(ScrollingView* newContent, ContentMargins n
 }
 
 void ScreenView::layout(UiLayoutContext& context) {
+    // The heading look is a function of the setting at each layout, thus a change shows at once
+    if (Theme_isSourceColoursEnabled()) {
+        titleView.setHeading(Fonts_getHeading(), Theme_getColor(THEME_ROLE_PRIMARY, false));
+    } else {
+        titleView.clearHeading();
+    }
     const int bodyTop    = layoutScreenTop(context, titleView, statusView);
     const int bodyBottom = layoutScreenBottom(context, buttonHintsView);
     if (!content) return;

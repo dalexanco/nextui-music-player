@@ -35,6 +35,14 @@ void TextView::setColor(SDL_Color newColor) {
     dirty       = true;
 }
 
+void TextView::setFont(TTF_Font* newFont) {
+    if (newFont == font) return;
+    font        = newFont;
+    renderStale = true;
+    dirty       = true;
+    resetScrolling();
+}
+
 bool TextView::isClipped() const { return maxWidth > 0 && textWidth > maxWidth; }
 
 void TextView::startScrolling(int32_t spPerSecond) {

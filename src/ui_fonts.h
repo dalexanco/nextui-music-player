@@ -16,6 +16,7 @@ void Fonts_unload(void);
 
 // Font accessors - return custom font or system fallback
 TTF_Font* Fonts_getXLarge(void);  // Extra large (36pt)
+TTF_Font* Fonts_getHeading(void); // Screen title of the source-colours look (20pt, about 60px on 1024x768)
 TTF_Font* Fonts_getTitle(void);   // Track title (Regular large)
 TTF_Font* Fonts_getArtist(void);  // Artist name (Medium)
 TTF_Font* Fonts_getAlbum(void);   // Album name (Bold)

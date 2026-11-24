@@ -70,6 +70,9 @@ SDL_Color Theme_getDeep(ThemeSource source);
 // "Source colours" setting, and source is the source of the top page.
 void Theme_setSourceColours(bool enabled, ThemeSource source);
 
+// True while the "Source colours" setting is on for the layout that runs.
+bool Theme_isSourceColoursEnabled(void);
+
 // The accent of the active source, packed as 0xRRGGBBAA, or 0 while source
 // colours are off. A view that draws a pill renders again when it changes.
 uint32_t Theme_getPillAccent(void);

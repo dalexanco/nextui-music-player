@@ -25,6 +25,8 @@ public:
     /** Returns: true when the text changed */
     bool setText(const std::string& text);
     void setColor(SDL_Color color);
+    /** Draws the text with another font. The view measures again. */
+    void setFont(TTF_Font* newFont);
 
     /** Returns true when the text is wider than the space of the last layout. */
     bool isClipped() const;

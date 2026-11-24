@@ -147,6 +147,10 @@ void Theme_setSourceColours(bool enabled, ThemeSource source) {
     active_source = source;
 }
 
+bool Theme_isSourceColoursEnabled(void) {
+    return source_colours_enabled;
+}
+
 uint32_t Theme_getPillAccent(void) {
     return source_colours_enabled ? pack_rgba(Theme_getAccent(active_source)) : 0;
 }
