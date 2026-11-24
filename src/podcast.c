@@ -1630,7 +1630,10 @@ void Podcast_getEpisodeLocalPath(PodcastFeed* feed, int episode_index, char* buf
     safe_feed[sizeof(safe_feed) - 1] = '\0';
     sanitize_for_filename(safe_feed);
 
-    snprintf(buf, buf_size, "%s/%s/%s.mp3", download_dir, safe_feed, safe_title);
+    // The extension of the enclosure: the player picks its decoder by it, and Radio
+    // France serves .m4a, which the MP3 decoder refuses.
+    snprintf(buf, buf_size, "%s/%s/%s.%s", download_dir, safe_feed, safe_title,
+             podcast_enclosure_extension(ep->url));
 }
 
 // Check if episode file exists locally
