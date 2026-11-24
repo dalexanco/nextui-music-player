@@ -119,9 +119,11 @@ private:
             emptyState.setMessage(status.total > 0 ? "Importing..." : "Reading the files...");
             emptyState.setLine(status.current);
         } else if (status.state == PODCAST_IMPORT_STATE_DONE) {
-            title += ": " + std::to_string(status.added) + " added";
-            if (status.duplicates > 0) title += ", " + std::to_string(status.duplicates) + " already";
-            if (status.failed + status.invalid_files > 0) title += ", " + std::to_string(status.failed + status.invalid_files) + " failed";
+            // Short, a longer title scrolls: the rows tell the rest
+            const int failed = status.failed + status.invalid_files;
+            title            = std::to_string(status.added) + " added";
+            if (failed > 0) title += ", " + std::to_string(failed) + " failed";
+            else if (status.duplicates > 0 && status.added == 0) title = std::to_string(status.duplicates) + " already subscribed";
             emptyState.setMessage("Nothing to import");
             emptyState.setLine("");
         } else {
