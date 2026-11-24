@@ -4,6 +4,8 @@
 #include <vector>
 
 #include "radio_favourites.h"
+#include "radio_sleep.h"
+#include "sleep_timer.h"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/art_fade_view.hpp"
 #include "ui/view/box_view.hpp"
@@ -27,8 +29,9 @@ constexpr const char* kRightHints[] = {"B", "CLOSE", "A", "CHOOSE", nullptr};
 
 class RadioOptionsPageImpl final : public UiPageImpl<RadioOptionsPage> {
 public:
-    RadioOptionsPageImpl(std::string url, std::string name, std::string genre)
+    RadioOptionsPageImpl(std::string url, std::string name, std::string genre, bool player)
         : UiPageImpl(PageKind::FullScreen),
+          player(player),
           url(std::move(url)),
           genreView(Fonts_getMedium(), true),
           titleView(Fonts_getHeading(), false) {
@@ -78,8 +81,8 @@ public:
         switch (button) {
             case Button::DpadUp:    panel.moveSelection(-1); return true;
             case Button::DpadDown:  panel.moveSelection(1); return true;
-            case Button::DpadLeft:
-            case Button::DpadRight: toggleFavourite(); return true;
+            case Button::DpadLeft:  change(-1); return true;
+            case Button::DpadRight: change(1); return true;
             case Button::A:
                 if (shortPress) choose();
                 return true;
@@ -91,13 +94,14 @@ public:
     }
 
 private:
-    enum class Row : int { Favourite, Rename, Remove, AddStations };
+    enum class Row : int { Favourite, Rename, Remove, AddStations, SleepTimer };
 
     /** The rows of the station, or the row of the list with no station */
     std::vector<OptionRow> readRows() const {
+        if (player) return {{"Favourite", getFavouriteValue()}, {"Sleep timer", getSleepValue()}};
         if (url.empty()) return {{"Add stations", ""}};
         return {
-            {"Favourite", RadioFavourites_isFavourite(url.c_str()) ? "On" : "Off"},
+            {"Favourite", getFavouriteValue()},
             {"Rename", ""},
             {"Remove", ""},
             {"Add stations", ""},
@@ -106,25 +110,44 @@ private:
 
     /** Returns the row that the selected index names, as the list with no station has one row. */
     Row selectedRow() const {
+        if (player) return panel.getSelectedIndex() == 0 ? Row::Favourite : Row::SleepTimer;
         if (url.empty()) return Row::AddStations;
         return static_cast<Row>(panel.getSelectedIndex());
     }
 
-    void toggleFavourite() {
-        if (selectedRow() != Row::Favourite) return;
-        const bool now = RadioFavourites_toggleFavourite(url.c_str());
-        panel.setValue(panel.getSelectedIndex(), now ? "On" : "Off");
+    std::string getFavouriteValue() const { return RadioFavourites_isFavourite(url.c_str()) ? "On" : "Off"; }
+
+    static std::string getSleepValue() {
+        const int minutes = RadioSleep_getMinutes();
+        return minutes > 0 ? std::to_string(minutes) + " min" : "Off";
+    }
+
+    /** Left and Right: changes the value of the selected row. */
+    void change(int direction) {
+        switch (selectedRow()) {
+            case Row::Favourite:
+                RadioFavourites_toggleFavourite(url.c_str());
+                panel.setValue(panel.getSelectedIndex(), getFavouriteValue());
+                break;
+            case Row::SleepTimer:
+                RadioSleep_set(SleepTimer_stepMinutes(RadioSleep_getMinutes(), direction));
+                panel.setValue(panel.getSelectedIndex(), getSleepValue());
+                break;
+            default: break;
+        }
     }
 
     void choose() {
         switch (selectedRow()) {
-            case Row::Favourite:    toggleFavourite(); return;
+            case Row::Favourite:
+            case Row::SleepTimer:   change(1); return;
             case Row::Rename:       finish(RadioStationAction::Rename); return;
             case Row::Remove:       finish(RadioStationAction::Remove); return;
             case Row::AddStations:  finish(RadioStationAction::AddStations); return;
         }
     }
 
+    bool player;
     std::string url;
     ArtFadeView artView;
     BoxView dimView;
@@ -137,5 +160,5 @@ private:
 }  // namespace
 
 std::unique_ptr<UiPageImplBase> RadioOptionsPage::createPageImpl() const {
-    return std::make_unique<RadioOptionsPageImpl>(url, name, genre);
+    return std::make_unique<RadioOptionsPageImpl>(url, name, genre, player);
 }

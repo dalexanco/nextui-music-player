@@ -1,5 +1,6 @@
 #include "background.h"
 #include "radio.h"
+#include "radio_sleep.h"
 #include "podcast.h"
 #include "music_session.h"
 #include "module_podcast.h"
@@ -22,6 +23,7 @@ void Background_stopAll(void) {
             break;
         case BG_RADIO:
             Radio_stop();
+            RadioSleep_clear();
             break;
         case BG_PODCAST:
             // Podcast_stop() saves progress in memory; flush to disk
@@ -62,7 +64,9 @@ void Background_tick(void) {
             break;
         case BG_RADIO:
             // Radio streams are self-sustaining, just check if still active
+            RadioSleep_tick();
             if (!Radio_isActive()) {
+                RadioSleep_clear();
                 ModuleCommon_setAutosleepDisabled(false);
                 active_bg = BG_NONE;
             }

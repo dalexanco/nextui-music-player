@@ -4,6 +4,7 @@
 #include "module_podcast.h"
 #include "ui/music_player_page.hpp"
 #include "ui/page/legacy_module_page.hpp"
+#include "ui/radio_playing_page.hpp"
 
 namespace {
 
@@ -21,7 +22,8 @@ protected:
 }  // namespace
 
 std::unique_ptr<UiPageImplBase> NowPlayingPage::createPageImpl() const {
-    // The music has its own native page. A podcast still runs its module.
+    // The music and the radio have their own native pages. A podcast still runs its module.
     if (Background_getActive() == BG_MUSIC) return createMusicPlayerPageImpl();
+    if (Background_getActive() == BG_RADIO) return createRadioPlayerPageImpl();
     return std::make_unique<NowPlayingPageImpl>();
 }

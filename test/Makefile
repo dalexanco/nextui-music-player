@@ -109,6 +109,7 @@ TESTS   += $(BIN)/test_music_player_layout
 TESTS   += $(BIN)/test_radio_favourites
 TESTS   += $(BIN)/test_radio_station_name
 TESTS   += $(BIN)/test_radio_search
+TESTS   += $(BIN)/test_radio_player_state
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -272,6 +273,9 @@ $(BIN)/test_radio_station_name: test_radio_station_name.cpp $(SRC)/radio_station
 
 $(BIN)/test_radio_search: test_radio_search.cpp $(SRC)/radio_search.cpp $(SRC)/radio_search.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_radio_search.cpp $(SRC)/radio_search.cpp
+
+$(BIN)/test_radio_player_state: test_radio_player_state.cpp $(SRC)/radio_player_state.cpp $(SRC)/radio_player_state.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_radio_player_state.cpp $(SRC)/radio_player_state.cpp
 
 $(BIN)/test_sleep_timer: test_sleep_timer.c $(SRC)/sleep_timer.c $(SRC)/sleep_timer.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_sleep_timer.c $(SRC)/sleep_timer.c

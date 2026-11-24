@@ -124,10 +124,11 @@ static const ControlHelp radio_list_controls[] = {
 
 // Radio playing controls (B shown in footer)
 static const ControlHelp radio_playing_controls[] = {
-    {"A", "Play/Pause"},
+    {"A", "Stop/Listen/Retry"},
+    {"X", "Stations"},
+    {"Y", "Options"},
     {"Up/R1", "Next Station"},
     {"Down/L1", "Prev Station"},
-    {"L2/L3", "Toggle Spectrum"},
     {"Select", "Screen Off"},
     {"Select + A", "Wake Screen"},
     {"Start (hold)", "Exit App"},
@@ -140,6 +141,15 @@ static const ControlHelp radio_manage_controls[] = {
     {"Left/Right", "Navigate"},
     {"X", "Favourite"},
     {"Y", "Options"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Radio stations sub-list controls (B shown in footer)
+static const ControlHelp radio_stations_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"A", "Listen"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -335,6 +345,10 @@ const ControlHelp* get_controls_help(HelpId help_id, const char** title) {
         case HELP_RADIO_BROWSE:
             controls = radio_browse_controls;
             page_title = "Add Stations";
+            break;
+        case HELP_RADIO_STATIONS:
+            controls = radio_stations_controls;
+            page_title = "Stations";
             break;
         case HELP_PODCAST_MENU:
             controls = podcast_menu_controls;

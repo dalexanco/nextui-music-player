@@ -172,6 +172,16 @@ existing keyboard (`ui_keyboard.c`) and the station directory code in `radio.c`.
 reconnecting / offline states [`tpl-radio-connexion`]. Live chip instead of a progress bar.
 - Validation: audit screens 39–43; unplug network and check the offline state.
 - Risk: stream logic (`radio.c`, 1968 lines) must stay untouched; the page only observes its state.
+- **Status: done, with deviations (built, NOT validated on device — screen-off, key lock, the start of a station after its "connecting" frame, the sleep timer and the art fade need a check on the Brick)** —
+  `RadioPlayingPage` (`ui/radio_playing_page.cpp`) is native and one template (`RadioPlayerPageImpl<Page>`) serves both `RadioPlayingPage` (result: the URL shown last, for the station list) and `NowPlayingPage` (`createRadioPlayerPageImpl()`, picked for `BG_RADIO`).
+  `module_radio_playing.*` and `ui_radio_playing.*` are deleted; `radio.c`, `icy.c` and the stream code are untouched. Layout reuses `layoutPlayer()` and `ArtFadeView` of the music player, plus the new shared `ChipView` (`ui/view/chip_view.*`, moved out of the music page).
+  Looks (`radio_player_state.*`, `test_radio_player_state`): LIVE (chip + "Listening for N min"), CONNECTING / RECONNECTING (chip + buffer bar + "Buffer N %"), PAUSED, OFFLINE (error text in the error colour, `A` = RETRY). `X` opens the stations sub-list (`makeRadioStationsPage()`, a `SubListPage`), `Y` the options (`RadioOptionsPage::forPlayer()`: favourite, sleep timer), Up/R1 and Down/L1 step the station, `A` stops / cancels / listens / retries, `B` leaves the station playing in the background, Select tap and the inactivity timeout go through the wake hint to a dark screen as in the music player.
+  The station starts one frame after the connecting screen was laid out (`Radio_play()` blocks the thread for the whole connection).
+  New logic: `radio_sleep.*` (sleep timer of the radio on the `sleep_timer.*` countdown, ticked by the page and by `Background_tick()` for `BG_RADIO`, so it also runs with the player closed).
+  Deviations, on purpose: (1) the spectrum is gone from the radio too (`L2/L3` keys removed); (2) the radio has no retry counter ("attempt 2 / 3" of the board): `radio.c` ends a failed stream in `RADIO_STATE_ERROR` and exposes no retry count, so RECONNECTING means "the stream ran low on sound and fills its buffer again"; (3) the old triangular album-art background is replaced by the art fade of the music player (`Radio_getAlbumArt()` while no fetch runs, else the generated tile); (4) the offline art is not greyed.
+  Fix in the same commit: the help dialog of the radio screens kept the podcast accent after 2.3 removed the radio help screen (`controls_help_page.cpp`).
+
+> **Phase 2 status: code done and built for tg5040 / tg5050; not validated on the Brick** (device unreachable). Host tests added: `test_radio_favourites`, `test_radio_station_name`, `test_radio_search`, `test_radio_player_state`.
 
 ### Phase 3 — Podcasts (largest legacy module, last of the three)
 

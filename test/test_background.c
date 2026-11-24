@@ -17,6 +17,8 @@ void Podcast_stop(void) {}
 void Podcast_flushProgress(void) {}
 bool Podcast_isActive(void) { return true; }
 void Radio_stop(void) {}
+void RadioSleep_tick(void) {}
+void RadioSleep_clear(void) {}
 bool Radio_isActive(void) { return true; }
 void ModuleCommon_setAutosleepDisabled(bool disabled) { (void)disabled; }
 

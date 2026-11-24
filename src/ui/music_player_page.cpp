@@ -20,6 +20,7 @@
 #include "ui/now_playing_page.hpp"
 #include "ui/view/art_fade_view.hpp"
 #include "ui/view/box_view.hpp"
+#include "ui/view/chip_view.hpp"
 #include "ui/view/progress_bar_view.hpp"
 #include "ui/view/screen_view.hpp"
 #include "ui/view/text_view.hpp"
@@ -52,49 +53,6 @@ constexpr const char* kRightHintsPaused[]  = {"X", "QUEUE", "A", "PLAY", nullptr
 
 /** Where the screen is: on, showing the wake hint before it goes dark, or dark */
 enum class ScreenMode : uint8_t { On, Hint, Off };
-
-/** A pill under a chip */
-class PillView : public UiView {
-public:
-    bool isDirty() const override { return dirty; }
-    void draw(UiDrawContext& context) override {
-        dirty                = false;
-        SDL_Surface* surface = context.getSurface();
-        if (!surface) return;
-        SDL_Rect pill{0, 0, surface->w, surface->h};
-        context.setContentRect(pill);
-        // The fill argument marks a pill with no separate center color
-        //noinspection HardcodedColor
-        GFX_blitPillColor(ASSET_WHITE_PILL, surface, &pill, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false),
-                          RGB_WHITE);
-    }
-
-private:
-    bool dirty = true;
-};
-
-/** A short label in a pill: the format, a playback mode */
-class ChipView : public UiLayout {
-public:
-    ChipView() : text(Fonts_getTiny(), false) { text.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false)); }
-
-    void setText(const std::string& label) { text.setText(label); }
-
-    void layout(UiLayoutContext& context) override {
-        const int height          = SCALE1(PILL_SIZE) / 2;
-        const int padding         = SCALE1(9);
-        UiLayoutContext measuring = context.createMeasuringContext();
-        const UiSize textSize     = measuring.layoutChild(text, SDL_Rect{0, 0, context.getMaxSize().w, height}).getSize();
-        const int width           = std::min(context.getMaxSize().w, textSize.w + 2 * padding);
-        context.setSize(UiSize{width, height});
-        context.layoutChild(pill, SDL_Rect{0, 0, width, height});
-        context.layoutChild(text, SDL_Rect{padding, (height - textSize.h) / 2, textSize.w, textSize.h});
-    }
-
-private:
-    PillView pill;
-    TextView text;
-};
 
 class MusicPlayerPageImpl final : public UiPageImpl<NowPlayingPage> {
 public:

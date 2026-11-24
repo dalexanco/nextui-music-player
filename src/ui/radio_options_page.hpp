@@ -23,9 +23,20 @@ public:
     RadioOptionsPage(std::string url, std::string name, std::string genre)
         : url(std::move(url)), name(std::move(name)), genre(std::move(genre)) {}
 
+    /**
+     * The options of the station that the player shows: favourite and sleep timer. Both apply at
+     * once, and the result is always None.
+     */
+    static RadioOptionsPage forPlayer(std::string url, std::string name, std::string genre) {
+        RadioOptionsPage page(std::move(url), std::move(name), std::move(genre));
+        page.player = true;
+        return page;
+    }
+
     std::unique_ptr<UiPageImplBase> createPageImpl() const override;
 
 private:
+    bool player = false;
     std::string url;
     std::string name;
     std::string genre;

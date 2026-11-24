@@ -7,7 +7,7 @@
 #include "ui/page/ui_page.hpp"
 
 /**
- * Runs the playing screen of the radio. Starts the station of `url`, or shows the station that
+ * The playing screen of the radio. Starts the station of `url`, or shows the station that
  * plays in the background when `url` is empty.
  */
 class RadioPlayingPage final : public UiPage {
@@ -22,5 +22,11 @@ public:
 private:
     std::string url;
 };
+
+/**
+ * Creates the playing screen of the radio for NowPlayingPage, with the station that plays in the
+ * background. Its result is false.
+ */
+std::unique_ptr<UiPageImplBase> createRadioPlayerPageImpl();
 
 #endif
