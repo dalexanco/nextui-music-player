@@ -15,13 +15,14 @@ class PodcastLegacyPage final : public UiPage {
 public:
     using Result = std::monostate;
 
-    PodcastLegacyPage(PodcastEntry entry, int arg = 0) : entry(entry), arg(arg) {}
+    PodcastLegacyPage(PodcastEntry entry, int arg = 0, int arg2 = 0) : entry(entry), arg(arg), arg2(arg2) {}
 
     std::unique_ptr<UiPageImplBase> createPageImpl() const override;
 
 private:
     PodcastEntry entry;
     int arg;
+    int arg2;
 };
 
 #endif

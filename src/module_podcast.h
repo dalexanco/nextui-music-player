@@ -15,15 +15,15 @@ extern "C" {
 // returns to them where it would go back to its menu.
 typedef enum {
     PODCAST_ENTRY_MENU = 0,   // The menu of the module (and the player of a podcast in the background)
-    PODCAST_ENTRY_EPISODES,   // arg: the index of the subscription
     PODCAST_ENTRY_MANAGE,
     PODCAST_ENTRY_QUEUE,
     PODCAST_ENTRY_PLAYER,     // The player of a podcast that plays in the background
+    PODCAST_ENTRY_PLAY,       // arg: the index of the subscription, arg2: the index of its episode, which plays
     PODCAST_ENTRY_CONTINUE    // arg: the index of the entry of Continue Listening, which plays
 } PodcastEntry;
 
 // Sets the entry of the next run of the module (it is back to the menu after that run)
-void PodcastModule_setEntry(PodcastEntry entry, int arg);
+void PodcastModule_setEntry(PodcastEntry entry, int arg, int arg2);
 
 // Starts the refresh of every subscription, once for each session of the app, with a network
 void PodcastModule_autoRefresh(void);

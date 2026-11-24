@@ -12,6 +12,7 @@
 #include "toast.h"
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
+#include "ui/podcast_episodes_page.hpp"
 #include "ui/podcast_legacy_page.hpp"
 #include "ui/podcast_show_panel.hpp"
 #include "ui/view/detail_panel_view.hpp"
@@ -226,7 +227,7 @@ private:
         int inKind = 0;
         switch (rows.getKind(list.getSelectedIndex(), inKind)) {
             case RowKind::Continue:  openLegacy(PODCAST_ENTRY_CONTINUE, inKind); break;
-            case RowKind::Show:      openLegacy(PODCAST_ENTRY_EPISODES, inKind); break;
+            case RowKind::Show:      getNavigator().open(makePodcastEpisodesPage(inKind)); break;
             case RowKind::Downloads: openLegacy(PODCAST_ENTRY_QUEUE, 0); break;
             case RowKind::None:      break;
         }

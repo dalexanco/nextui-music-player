@@ -5,9 +5,22 @@
 #include <string>
 #include <variant>
 
+#include <vector>
+
 #include "help_screen.h"
+#include "input/input_events.hpp"
 #include "ui/page/ui_page.hpp"
 #include "ui_theme.h"
+
+/** The mark at the start of a row: a star for what is new, a check for what is done */
+enum class SubListMark : uint8_t { None, New, Done };
+
+/** A key of the page besides A and B, with the label of its hint. `left` puts the hint with START. */
+struct SubListKey {
+    input::Button button;
+    std::string label;
+    bool left;
+};
 
 /**
  * What a sub-list shows and does: the queue of the music, and later the stations, the episodes and
@@ -29,6 +42,33 @@ public:
     /** Returns true for the row that plays now: it gets the playing indicator. */
     virtual bool isPlaying([[maybe_unused]] int index) const { return false; }
 
+    /** Returns the mark of the row at `index`. The indicator of the row that plays takes its place. */
+    virtual SubListMark getRowMark([[maybe_unused]] int index) const { return SubListMark::None; }
+
+    /**
+     * Returns the label of A for the row at `index`, or an empty text for the label of the page.
+     * The page reads it again when the cursor moves, and when the version changes.
+     */
+    virtual std::string getVerb([[maybe_unused]] int index) const { return {}; }
+
+    /** Returns a number that changes when the rows change (a download that moves, a mark): the page then reads them again. */
+    virtual long getVersion() const { return 0; }
+
+    /** Called at each frame of the page, for a source that has work of its own (a refresh to follow). */
+    virtual void onTick() {}
+
+    /** Called each time the page reads the rows again, before it does. */
+    virtual void onReload() {}
+
+    /** Returns the keys of the source besides A and B (X and Y). */
+    virtual std::vector<SubListKey> getKeys() const { return {}; }
+
+    /**
+     * Called for the key `button` of getKeys() on the row at `index` (-1 with no row). The page
+     * reads the rows again after it.
+     */
+    virtual void onKey([[maybe_unused]] input::Button button, [[maybe_unused]] int index, [[maybe_unused]] PageNavigator& navigator) {}
+
     /** Returns the row that the cursor starts on. */
     virtual int getInitialIndex() const { return 0; }
 
@@ -39,7 +79,10 @@ public:
      * Called for A on the row at `index`.
      * Returns: true when the page closes
      */
-    virtual bool onActivate(int index) = 0;
+    virtual bool onActivate([[maybe_unused]] int index) { return false; }
+
+    /** The same, for a source that opens a page: `navigator` is the one of the sub-list. */
+    virtual bool onActivate(int index, [[maybe_unused]] PageNavigator& navigator) { return onActivate(index); }
 };
 
 /**

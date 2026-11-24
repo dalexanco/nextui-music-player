@@ -324,6 +324,23 @@ int Podcast_getDownloadedEpisodeIndex(int feed_index, int episode_index);
 // Returns pointer to episode in internal cache, or NULL if invalid
 PodcastEpisode* Podcast_getEpisode(int feed_index, int episode_index);
 
+// What a list of episodes shows of each episode
+typedef struct {
+    char guid[PODCAST_MAX_GUID];
+    char title[PODCAST_MAX_TITLE];
+    int progress_sec;                    // -1: played
+    bool is_new;
+} PodcastEpisodeBrief;
+
+// Fills `out` with the briefs of the episodes of a feed, in the order of the list, reading the
+// episodes file once (the page cache of Podcast_getEpisode would read it again for each page).
+// `out` is allocated by the caller for `max` entries. Returns the number of briefs written.
+int Podcast_getEpisodeBriefs(int feed_index, PodcastEpisodeBrief* out, int max);
+
+// The subscription and the episode that play, or -1 when none plays
+int Podcast_getCurrentFeedIndex(void);
+int Podcast_getCurrentEpisodeIndex(void);
+
 // Load a page of episodes into cache
 // Returns number of episodes loaded
 int Podcast_loadEpisodePage(int feed_index, int offset);

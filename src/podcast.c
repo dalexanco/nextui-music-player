@@ -392,6 +392,55 @@ int Podcast_loadEpisodePage(int feed_index, int offset) {
     return episode_cache_count;
 }
 
+int Podcast_getEpisodeBriefs(int feed_index, PodcastEpisodeBrief* out, int max) {
+    if (feed_index < 0 || feed_index >= subscription_count || !out || max <= 0) return 0;
+
+    PodcastFeed* feed = &subscriptions[feed_index];
+    set_feed_id(feed);
+
+    char episodes_path[512];
+    get_episodes_file_path(feed->feed_id, episodes_path, sizeof(episodes_path));
+
+    JSON_Value* root = json_parse_file(episodes_path);
+    if (!root) return 0;
+    JSON_Array* arr = json_value_get_array(root);
+    if (!arr) {
+        json_value_free(root);
+        return 0;
+    }
+
+    int total = (int)json_array_get_count(arr);
+    int written = 0;
+    for (int i = 0; i < total && written < max; i++) {
+        JSON_Object* ep_obj = json_array_get_object(arr, i);
+        if (!ep_obj) continue;
+
+        PodcastEpisodeBrief* brief = &out[written];
+        memset(brief, 0, sizeof(*brief));
+        const char* str = json_object_get_string(ep_obj, "guid");
+        if (str) strncpy(brief->guid, str, PODCAST_MAX_GUID - 1);
+        str = json_object_get_string(ep_obj, "title");
+        if (str) strncpy(brief->title, str, PODCAST_MAX_TITLE - 1);
+        brief->progress_sec = (int)json_object_get_number(ep_obj, "progress");
+        brief->is_new = (json_object_get_boolean(ep_obj, "is_new") == 1);
+
+        // progress.json is more recent than episodes.json
+        int cached_progress = Podcast_getProgress(feed->feed_url, brief->guid);
+        if (cached_progress != 0) brief->progress_sec = cached_progress;
+        written++;
+    }
+    json_value_free(root);
+    return written;
+}
+
+int Podcast_getCurrentFeedIndex(void) {
+    return current_feed ? current_feed_index : -1;
+}
+
+int Podcast_getCurrentEpisodeIndex(void) {
+    return current_feed ? current_episode_index : -1;
+}
+
 // Get episode by index (loads from cache, auto-loads page if needed)
 PodcastEpisode* Podcast_getEpisode(int feed_index, int episode_index) {
     if (feed_index < 0 || feed_index >= subscription_count || episode_index < 0) {
