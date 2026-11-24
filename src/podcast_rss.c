@@ -6,9 +6,6 @@
 #include <time.h>
 #include <ctype.h>
 
-#include "defines.h"
-#include "api.h"
-
 // yxml parser
 #include "yxml.h"
 
@@ -252,7 +249,7 @@ int podcast_rss_parse_with_episodes(const char* xml_data, int xml_len, PodcastFe
                         state = RSS_STATE_CHANNEL_TITLE;
                     } else if (strcmp(elem, "description") == 0) {
                         state = RSS_STATE_CHANNEL_DESCRIPTION;
-                    } else if (strcmp(elem, "author") == 0) {
+                    } else if (strcmp(elem, "author") == 0 || strcmp(elem, "itunes:author") == 0) {
                         state = RSS_STATE_ITUNES_AUTHOR;
                     } else if (strcmp(elem, "image") == 0) {
                         state = RSS_STATE_CHANNEL_IMAGE;

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:pa="http://podcastaddict.com" xmlns:podcastRF="http://radiofrance.fr/Lancelot/Podcast#" xmlns:googleplay="http://www.google.com/schemas/play-podcasts/1.0" version="2.0">
+  <channel>
+    <title>Bestioles</title>
+    <link>https://www.radiofrance.fr/franceinter/podcasts/bestioles</link>
+    <description>Les aventures du monde animal ! Un podcast pour les 5-7 ans.   
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr/franceinter/podcasts/bestioles?at_campaign=desc_podcast&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+    <language>fr</language>
+    <copyright>Radio France</copyright>
+    <lastBuildDate>Tue, 24 Nov 2026 16:00:01 +0100</lastBuildDate>
+    <generator>Radio France</generator>
+    <image>
+      <url>https://www.radiofrance.fr/s3/cruiser-production-eu3/2025/12/c7b61f65-164a-4ec8-b0dd-74a887acf3bc/1400x1400_sc_carre-bestioles-novembre.jpg?1795532401694</url>
+      <title>Bestioles</title>
+      <link>https://www.radiofrance.fr/franceinter/podcasts/bestioles</link>
+    </image>
+    <itunes:author>France Inter</itunes:author>
+    <itunes:category text="Kids &amp; Family"/>
+    <itunes:explicit>no</itunes:explicit>
+    <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2025/12/c7b61f65-164a-4ec8-b0dd-74a887acf3bc/1400x1400_sc_carre-bestioles-novembre.jpg?1795532401694"/>
+    <itunes:owner>
+      <itunes:email>podcast@radiofrance.com</itunes:email>
+      <itunes:name>Radio France</itunes:name>
+    </itunes:owner>
+    <itunes:subtitle>Bestioles</itunes:subtitle>
+    <itunes:summary>Les aventures du monde animal ! Un podcast pour les 5-7 ans.   
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr/franceinter/podcasts/bestioles?at_campaign=desc_podcast&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+    <itunes:new-feed-url>https://radiofrance-podcast.net/podcast09/35099478-7c72-4f9e-a6de-1b928400e9e5/podcast_a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974.xml</itunes:new-feed-url>
+    <pa:new-feed-url>https://radiofrance-podcast.net/podcast09/d4463877-caa3-4507-9399-f5eb00fde027/podcast_a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974.xml</pa:new-feed-url>
+    <podcastRF:originStation>1</podcastRF:originStation>
+    <googleplay:block>yes</googleplay:block>
+        <item>
+      <title>Le panda roux, le carnivore végétarien !</title>
+      <link>https://www.radiofrance.fr</link>
+      <description>durée : 00:11:49  - Bestioles - Le panda roux passe ses journées à dormir ou à grignoter du bambou. Une tranquillité perturbée par ses congénères qui cherchent à le déloger, mais surtout par une panthère des neiges qui voudrait bien en faire son dîner. 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+      <author>podcast@radiofrance.com (Radio France)</author>
+      <category>Kids &amp; Family</category>
+      <enclosure url="https://proxycast.radiofrance.fr/0760f712-f39e-4aba-a3f2-891453f91f66/a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974/8669653f-4a46-49fb-abc2-b1ae72029ed0/26704-09.06.2026-ITEMA_24544227-2026F43553E0015-NET_MFI_ABC1AAD6-50D9-4F4F-B2BC-FA6DA743153F-27-45153b36767668f45d11b5a903ec861c.m4a" length="11344000" type="audio/x-m4a"/>
+      <guid isPermaLink="false">df995d4b-03bf-448f-baa9-95306d3e1519</guid>
+      <pubDate>Fri, 28 Aug 2026 04:42:00 +0200</pubDate>
+      <podcastRF:businessReference>43553</podcastRF:businessReference>
+      <podcastRF:magnetothequeID>2026F43553E0015</podcastRF:magnetothequeID>
+      <itunes:title>Le panda roux, le carnivore végétarien !</itunes:title>
+      <itunes:author>France Inter</itunes:author>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:keywords>le, panda, roux, le, carnivore, végétarien</itunes:keywords>
+      <itunes:subtitle>Le panda roux, le carnivore végétarien !</itunes:subtitle>
+      <itunes:summary>durée : 00:11:49  - Bestioles - Le panda roux passe ses journées à dormir ou à grignoter du bambou. Une tranquillité perturbée par ses congénères qui cherchent à le déloger, mais surtout par une panthère des neiges qui voudrait bien en faire son dîner. 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+      <itunes:duration>00:11:49</itunes:duration>
+      <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2025/12/c7b61f65-164a-4ec8-b0dd-74a887acf3bc/1400x1400_sc_carre-bestioles-novembre.jpg"/>
+      <googleplay:block>yes</googleplay:block>
+    </item>
+    <item>
+      <title>Podcasts natifs du jeudi 20 août 2026</title>
+      <link>https://www.radiofrance.fr</link>
+      <description>durée : 00:12:24  - Bestioles 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+      <author>podcast@radiofrance.com (Radio France)</author>
+      <category>Kids &amp; Family</category>
+      <enclosure url="https://proxycast.radiofrance.fr/0760f712-f39e-4aba-a3f2-891453f91f66/a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974/8e474e38-f7c5-4ccb-93f7-20c408b2e92b/26704-09.06.2026-ITEMA_24544227-2026F43553E0014-NET_MFI_1EE9BA93-5B70-43B8-BC1B-C91A558F9FED-27-2b9f237abcb3d313bbb84ccf95e54660.m4a" length="11904000" type="audio/x-m4a"/>
+      <guid isPermaLink="false">0c1d00a0-58c9-4b9f-b78e-bf42289ec645</guid>
+      <pubDate>Thu, 27 Aug 2026 04:42:00 +0200</pubDate>
+      <podcastRF:businessReference>43553</podcastRF:businessReference>
+      <podcastRF:magnetothequeID>2026F43553E0014</podcastRF:magnetothequeID>
+      <itunes:title>Podcasts natifs du jeudi 20 août 2026</itunes:title>
+      <itunes:author>France Inter</itunes:author>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:keywords>podcasts, natifs, du, jeudi, 20, août, 2026</itunes:keywords>
+      <itunes:subtitle>Podcasts natifs du jeudi 20 août 2026</itunes:subtitle>
+      <itunes:summary>durée : 00:12:24  - Bestioles 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+      <itunes:duration>00:12:24</itunes:duration>
+      <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2025/12/c7b61f65-164a-4ec8-b0dd-74a887acf3bc/1400x1400_sc_carre-bestioles-novembre.jpg"/>
+      <googleplay:block>yes</googleplay:block>
+    </item>
+    <item>
+      <title>Podcasts natifs du mercredi 19 août 2026</title>
+      <link>https://www.radiofrance.fr</link>
+      <description>durée : 00:10:25  - Bestioles 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+      <author>podcast@radiofrance.com (Radio France)</author>
+      <category>Kids &amp; Family</category>
+      <enclosure url="https://proxycast.radiofrance.fr/0760f712-f39e-4aba-a3f2-891453f91f66/a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974/8e65b84e-b714-4a41-8398-de1980b5cb95/26704-09.06.2026-ITEMA_24544227-2026F43553E0013-NET_MFI_BAABBFE1-FF4B-48D1-82B0-0A6C263FE14F-27-c453aaaba52d6ac4316d590bed2a5614.m4a" length="10000000" type="audio/x-m4a"/>
+      <guid isPermaLink="false">48fab33a-26be-4da3-8416-e2f85cc9231d</guid>
+      <pubDate>Wed, 26 Aug 2026 04:42:00 +0200</pubDate>
+      <podcastRF:businessReference>43553</podcastRF:businessReference>
+      <podcastRF:magnetothequeID>2026F43553E0013</podcastRF:magnetothequeID>
+      <itunes:title>Podcasts natifs du mercredi 19 août 2026</itunes:title>
+      <itunes:author>France Inter</itunes:author>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:keywords>podcasts, natifs, du, mercredi, 19, août, 2026</itunes:keywords>
+      <itunes:subtitle>Podcasts natifs du mercredi 19 août 2026</itunes:subtitle>
+      <itunes:summary>durée : 00:10:25  - Bestioles 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+      <itunes:duration>00:10:25</itunes:duration>
+      <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2025/12/c7b61f65-164a-4ec8-b0dd-74a887acf3bc/1400x1400_sc_carre-bestioles-novembre.jpg"/>
+      <googleplay:block>yes</googleplay:block>
+    </item>
+    <item>
+      <title>Retrouvez tous les épisodes sur l’appli Radio France</title>
+      <link>https://www.radiofrance.fr/application-mobile-radio-france</link>
+      <description>Retrouvez tous les épisodes sur l’appli Radio France</description>
+      <author>podcast@radiofrance.com (Radio France)</author>
+      <enclosure url="https://media.radiofrance-podcast.net/podcast09/app_rf_promotion.mp3?stationId=1" length="0" type="audio/mpeg"/>
+      <guid isPermaLink="true">https://media.radiofrance-podcast.net/podcast09/app_rf_promotion.mp3?stationId=1</guid>
+      <pubDate>Wed, 07 Apr 2021 21:09:07 +0200</pubDate>
+      <itunes:title>Retrouvez tous les épisodes sur l’appli Radio France</itunes:title>
+      <itunes:author>Radio France</itunes:author>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:subtitle>Retrouvez tous les épisodes sur l’appli Radio France</itunes:subtitle>
+      <itunes:summary>Retrouvez tous les épisodes sur l’appli Radio France</itunes:summary>
+      <itunes:duration>00:00:12</itunes:duration>
+      <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production/2022/01/04f722eb-ed54-439f-9be6-532ecad002c9/1400x1400_radio-france-avatar.jpg"/>
+    </item>
+  </channel>
+</rss>
