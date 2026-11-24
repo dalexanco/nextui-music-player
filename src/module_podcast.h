@@ -11,16 +11,6 @@ extern "C" {
 #include "display_helper.h"
 #include "module_common.h"
 
-// Where the module starts. The native pages that open it start it on one screen, and the module
-// returns to them where it would go back to its menu.
-typedef enum {
-    PODCAST_ENTRY_MANAGE = 0, // Search, Top Shows
-    PODCAST_ENTRY_QUEUE       // The download queue
-} PodcastEntry;
-
-// Sets the entry of the next run of the module (it is back to Manage after that run)
-void PodcastModule_setEntry(PodcastEntry entry);
-
 // Starts the refresh of every subscription, once for each session of the app, with a network
 void PodcastModule_autoRefresh(void);
 

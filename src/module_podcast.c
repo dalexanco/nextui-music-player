@@ -26,8 +26,7 @@ typedef enum {
     PODCAST_INTERNAL_MENU,
     PODCAST_INTERNAL_MANAGE,
     PODCAST_INTERNAL_TOP_SHOWS,
-    PODCAST_INTERNAL_SEARCH_RESULTS,
-    PODCAST_INTERNAL_DOWNLOAD_QUEUE
+    PODCAST_INTERNAL_SEARCH_RESULTS
 } PodcastInternalState;
 
 // Module state
@@ -50,18 +49,6 @@ static ListNav podcast_search_nav = {
     .items_per_page = 1,
 };
 static char podcast_search_query[256] = "";
-// Guid of the item under the queue cursor, remembered across frames: the worker
-// compacts COMPLETE and FAILED items out of wherever they sat, so a count delta
-// alone cannot say how far the selection shifted.
-static char podcast_queue_cursor_guid[PODCAST_MAX_GUID] = "";
-
-static ListNav podcast_queue_nav = {
-    .selected       = 0,
-    .scroll         = 0,
-    .count          = 0,
-    .items_per_page = 1,
-};
-
 // Periodic progress saving
 #define PROGRESS_SAVE_INTERVAL_MS 30000  // 30 seconds
 
@@ -70,14 +57,6 @@ static bool show_confirm = false;
 static int confirm_target_index = -1;
 static char confirm_podcast_name[256] = "";
 static int confirm_return_state = 0;  // 0 = menu, 1 = top_shows, 2 = search_results
-
-// Where the next run of the module starts. The native pages start it on one screen and take the
-// screen back when the module returns to its menu.
-static PodcastEntry next_entry = PODCAST_ENTRY_MANAGE;
-
-void PodcastModule_setEntry(PodcastEntry entry) {
-    next_entry = entry;
-}
 
 void PodcastModule_autoRefresh(void) {
     // Auto-check for new episodes once per app session
@@ -92,9 +71,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
     Podcast_init();
     PodcastModule_autoRefresh();
 
-    const PodcastEntry entry = next_entry;
-    next_entry = PODCAST_ENTRY_MANAGE;
-
     PodcastInternalState state = PODCAST_INTERNAL_MANAGE;
     ModuleExitReason reason = MODULE_EXIT_TO_MENU;
     int dirty = 1;
@@ -105,12 +81,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
     ModuleCommon_recordInputTime();
     show_confirm = false;
 
-    if (entry == PODCAST_ENTRY_QUEUE) {
-        ListNav_scrollToTop(&podcast_queue_nav);
-        state = PODCAST_INTERNAL_DOWNLOAD_QUEUE;
-    } else {
-        ListNav_scrollToTop(&podcast_manage_nav);
-    }
+    ListNav_scrollToTop(&podcast_manage_nav);
 
     while (1) {
         ModuleCommon_frameBegin(true);
@@ -156,7 +127,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 case PODCAST_INTERNAL_MANAGE:         help_id = HELP_PODCAST_MANAGE;         break;
                 case PODCAST_INTERNAL_TOP_SHOWS:      help_id = HELP_PODCAST_TOP_SHOWS;      break;
                 case PODCAST_INTERNAL_SEARCH_RESULTS: help_id = HELP_PODCAST_SEARCH_RESULTS; break;
-                case PODCAST_INTERNAL_DOWNLOAD_QUEUE: help_id = HELP_PODCAST_DOWNLOADS;      break;
                 default:                              help_id = HELP_PODCAST_MENU;           break;
             }
 
@@ -367,84 +337,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 dirty = 1;
             }
         }
-        // =========================================
-        // DOWNLOAD QUEUE STATE
-        // =========================================
-        else if (state == PODCAST_INTERNAL_DOWNLOAD_QUEUE) {
-            int queue_count = 0;
-            PodcastDownloadItem* qitems = Podcast_getDownloadQueue(&queue_count);
-            podcast_queue_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
-
-            if (podcast_queue_nav.count != queue_count) {
-                // Find where the selected item went. What vanished from above it
-                // is what shifted the selection; moving the window by the same
-                // amount holds it on its screen row. Redraw regardless - rows
-                // below the cursor repaint even when the cursor does not move.
-                int now_at = -1;
-                if (podcast_queue_cursor_guid[0]) {
-                    for (int i = 0; i < queue_count; i++) {
-                        if (strcmp(qitems[i].episode_guid, podcast_queue_cursor_guid) == 0) {
-                            now_at = i;
-                            break;
-                        }
-                    }
-                }
-                if (now_at >= 0 && now_at < podcast_queue_nav.selected) {
-                    ListNav_onItemsRemoved(&podcast_queue_nav, 0,
-                                           podcast_queue_nav.selected - now_at);
-                }
-                ListNav_reconcile(&podcast_queue_nav, queue_count);
-                Podcast_clearTitleScroll();
-                dirty = 1;
-            }
-
-            // Force redraw when downloads are active
-            for (int qi = 0; qi < queue_count; qi++) {
-                PodcastDownloadItem* qitem = &Podcast_getDownloadQueue(NULL)[qi];
-                if (qitem->status == PODCAST_DOWNLOAD_DOWNLOADING || qitem->status == PODCAST_DOWNLOAD_PENDING) {
-                    dirty = 1;
-                    break;
-                }
-            }
-
-            if (Podcast_isTitleScrolling()) Podcast_animateTitleScroll();
-            if (Podcast_titleScrollNeedsRender()) dirty = 1;
-
-            // Remember what the cursor is on, for the next count change.
-            if (podcast_queue_nav.selected >= 0 && podcast_queue_nav.selected < queue_count) {
-                snprintf(podcast_queue_cursor_guid, sizeof(podcast_queue_cursor_guid), "%s",
-                         qitems[podcast_queue_nav.selected].episode_guid);
-            } else {
-                podcast_queue_cursor_guid[0] = '\0';
-            }
-
-            if (ListNav_step(&podcast_queue_nav, ListNavPad_read()).moved) {
-                Podcast_clearTitleScroll();
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_X) && queue_count > 0) {
-                // Cancel/remove selected item
-                PodcastDownloadItem* queue = Podcast_getDownloadQueue(NULL);
-                if (podcast_queue_nav.selected < queue_count) {
-                    PodcastDownloadItem* sel = &queue[podcast_queue_nav.selected];
-                    if (Podcast_cancelEpisodeDownload(sel->feed_url, sel->episode_guid) == 0) {
-                        Toast_show("Download removed", TOAST_DURATION);
-                        ListNav_onItemRemoved(&podcast_queue_nav, podcast_queue_nav.selected);
-                        podcast_queue_cursor_guid[0] = '\0';
-                    } else {
-                        Toast_show("Remove failed", TOAST_DURATION);
-                    }
-                    Podcast_clearTitleScroll();
-                }
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_B)) {
-                Podcast_clearTitleScroll();
-                state = PODCAST_INTERNAL_MENU;
-                dirty = 1;
-            }
-        }
-
         // The module gives the screen back to the page that started it
         if (state == PODCAST_INTERNAL_MENU) {
             Podcast_clearTitleScroll();
@@ -475,9 +367,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                         break;
                     case PODCAST_INTERNAL_SEARCH_RESULTS:
                         render_podcast_search_results(screen, show_setting, podcast_search_nav.selected, &podcast_search_nav.scroll);
-                        break;
-                    case PODCAST_INTERNAL_DOWNLOAD_QUEUE:
-                        render_podcast_download_queue(screen, show_setting, podcast_queue_nav.selected, &podcast_queue_nav.scroll);
                         break;
                 }
             }

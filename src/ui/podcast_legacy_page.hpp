@@ -7,20 +7,12 @@
 #include "module_podcast.h"
 #include "ui/page/ui_page.hpp"
 
-/**
- * Runs the legacy module of the podcasts on one of its screens, for the screens that no native
- * page replaces yet. The module returns where it would go back to its menu.
- */
+/** Runs the legacy module of the podcasts: Manage, Search and Top Shows, until their own pages. */
 class PodcastLegacyPage final : public UiPage {
 public:
     using Result = std::monostate;
 
-    explicit PodcastLegacyPage(PodcastEntry entry) : entry(entry) {}
-
     std::unique_ptr<UiPageImplBase> createPageImpl() const override;
-
-private:
-    PodcastEntry entry;
 };
 
 #endif

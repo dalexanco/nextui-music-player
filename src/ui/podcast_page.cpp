@@ -16,6 +16,7 @@
 #include "ui/podcast_episodes_page.hpp"
 #include "ui/podcast_legacy_page.hpp"
 #include "ui/podcast_playing_page.hpp"
+#include "ui/podcast_queue_page.hpp"
 #include "ui/podcast_show_panel.hpp"
 #include "ui/view/detail_panel_view.hpp"
 #include "ui/view/empty_state_view.hpp"
@@ -204,7 +205,7 @@ public:
             return true;
         }
         if (event.isSingleButton(Button::Y)) {
-            openLegacy(PODCAST_ENTRY_MANAGE);
+            getNavigator().open(PodcastLegacyPage{});
             return true;
         }
         return false;
@@ -223,7 +224,6 @@ private:
                std::to_string(queue > 0) + "/" + std::to_string(newEpisodes);
     }
 
-    void openLegacy(PodcastEntry entry) { getNavigator().open(PodcastLegacyPage{entry}); }
 
     /** Plays the episode of an entry of Continue Listening, which is found again by its guid. */
     void continueListening(int index) {
@@ -252,7 +252,7 @@ private:
         switch (rows.getKind(list.getSelectedIndex(), inKind)) {
             case RowKind::Continue:  continueListening(inKind); break;
             case RowKind::Show:      getNavigator().open(makePodcastEpisodesPage(inKind)); break;
-            case RowKind::Downloads: openLegacy(PODCAST_ENTRY_QUEUE); break;
+            case RowKind::Downloads: getNavigator().open(PodcastQueuePage{}); break;
             case RowKind::None:      break;
         }
     }
