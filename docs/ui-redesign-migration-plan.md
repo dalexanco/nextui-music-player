@@ -46,7 +46,7 @@ back, or the equivalent) and one more.
 - A page with a single extra action shows it as it is (`X REMOVE`, `X REFRESH`), also at the left.
 - A page with no extra action keeps `START CONTROLS` at the left (the menus of the boards).
 - `A` goes when there is nothing to act on (empty list); `START` keeps opening the help on every page.
-- The help texts name the options (`Y  Options (Manage, Remove)`) and no longer list the keys that moved into the panel.
+- The help texts name the options (`Y  Options`) and no longer list the keys that moved into the panel.
 
 Applied to: podcasts (`A OPEN`, `B BACK`, `Y OPTIONS`: manage, unsubscribe), episodes (`Y OPTIONS`: refresh, mark played / new),
 radio list and manage list (`Y OPTIONS`), add stations (`Y OPTIONS`: keyboard, country), playlists (`Y OPTIONS`: new, delete),

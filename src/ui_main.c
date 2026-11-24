@@ -39,7 +39,7 @@ static const ControlHelp library_menu_controls[] = {
 static const ControlHelp browser_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Options (Add, Delete)"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -95,7 +95,7 @@ static const ControlHelp keyboard_controls[] = {
 static const ControlHelp playlist_list_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Options (New, Delete)"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -113,7 +113,7 @@ static const ControlHelp playlist_detail_controls[] = {
 static const ControlHelp radio_list_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Options (Manage, Remove)"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -135,7 +135,7 @@ static const ControlHelp radio_playing_controls[] = {
 static const ControlHelp radio_manage_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Options (Favourite...)"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -154,7 +154,7 @@ static const ControlHelp radio_browse_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
     {"A", "Add Station / Search"},
-    {"Y", "Options (Keyboard...)"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -163,7 +163,7 @@ static const ControlHelp radio_browse_controls[] = {
 static const ControlHelp podcast_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Options (Manage...)"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -199,7 +199,7 @@ static const ControlHelp podcast_search_controls[] = {
 static const ControlHelp podcast_episodes_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Y", "Options (Refresh...)"},
+    {"Y", "Options"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
