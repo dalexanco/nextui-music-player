@@ -11,19 +11,25 @@ extern "C" {
 #include "api.h"
 }
 
-void PillView::draw(UiDrawContext& context) {
-    dirty                = false;
-    SDL_Surface* surface = context.getSurface();
-    if (!surface) return;
-    SDL_Rect pill{0, 0, surface->w, surface->h};
-    context.setContentRect(pill);
-    // The fill argument marks a pill with no separate center color
-    //noinspection HardcodedColor
-    GFX_blitPillColor(ASSET_WHITE_PILL, surface, &pill, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false), RGB_WHITE);
-}
-
 ChipView::ChipView() : text(Fonts_getTiny(), false) {
     text.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+}
+
+void ChipView::setOutline() {
+    outline  = true;
+    hasColor = false;
+}
+
+void ChipView::setOutline(SDL_Color color) {
+    outline      = true;
+    hasColor     = true;
+    outlineColor = color;
+    text.setColor(color);
+}
+
+void ChipView::setPill() {
+    outline  = false;
+    hasColor = false;
 }
 
 void ChipView::layout(UiLayoutContext& context) {
@@ -33,6 +39,17 @@ void ChipView::layout(UiLayoutContext& context) {
     const UiSize textSize     = measuring.layoutChild(text, SDL_Rect{0, 0, context.getMaxSize().w, height}).getSize();
     const int width           = std::min(context.getMaxSize().w, textSize.w + 2 * padding);
     context.setSize(UiSize{width, height});
-    context.layoutChild(pill, SDL_Rect{0, 0, width, height});
+    const SDL_Color none = {0, 0, 0, 0};
+    if (outline) {
+        const SDL_Color edge = hasColor ? outlineColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
+        if (!hasColor) text.setColor(edge);
+        shape.setStyle(RoundedRectStyle{none, edge, 2, SCALE1(2)});
+    } else {
+        // The board fills the pill with white at 14 %
+        SDL_Color fill = Theme_getColor(THEME_ROLE_PRIMARY, false);
+        fill.a         = 36;
+        shape.setStyle(RoundedRectStyle{fill, none, 0, 0});
+    }
+    context.layoutChild(shape, SDL_Rect{0, 0, width, height});
     context.layoutChild(text, SDL_Rect{padding, (height - textSize.h) / 2, textSize.w, textSize.h});
 }

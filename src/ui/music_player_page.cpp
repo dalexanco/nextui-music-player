@@ -79,6 +79,7 @@ public:
         for (size_t row = 0; row < kMaxLyricRows; row++) {
             lyricViews.push_back(std::make_unique<TextView>(Fonts_getSmall(), false));
         }
+        formatChip.setOutline();
         modeChips[0].setText("SHUFFLE");
         modeChips[1].setText("REPEAT");
         modeChips[2].setText("LYRICS");

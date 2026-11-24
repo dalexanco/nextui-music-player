@@ -83,6 +83,7 @@ public:
         wakeHintView.setText("Press SELECT + A to wake screen");
         artView.setSource(THEME_SOURCE_PODCAST);
         podcastChip.setText("PODCAST");
+        podcastChip.setOutline();
     }
 
     ~PodcastPlayerPageImpl() override { freeArt(); }

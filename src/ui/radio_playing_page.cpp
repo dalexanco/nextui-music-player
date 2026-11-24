@@ -85,6 +85,7 @@ public:
         wakeHintView.setText("Press SELECT + A to wake screen");
         artView.setSource(THEME_SOURCE_RADIO);
         radioChip.setText("RADIO");
+        radioChip.setOutline();
     }
 
     std::span<const ButtonRequest> getButtonRequests() const override { return {}; }
@@ -375,7 +376,13 @@ private:
 
     void refreshProgress(float buffer) {
         stateChip.setText(getRadioChipText(view));
-        stateChip.setTextColor(Theme_getColor(view == RadioView::Offline ? THEME_ROLE_STATUS_ERROR : THEME_ROLE_PRIMARY, false));
+        if (view == RadioView::Offline) {
+            // An outline in the error color reads on both backgrounds
+            stateChip.setOutline(Theme_getColor(THEME_ROLE_STATUS_ERROR, false));
+        } else {
+            stateChip.setPill();
+            stateChip.setTextColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+        }
         if (view == RadioView::Live) {
             listeningView.setText(formatListening(SDL_GetTicks() - listenStart));
         } else if (view == RadioView::Offline) {
