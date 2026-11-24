@@ -58,6 +58,16 @@ int MusicSession_getTrackNumber(void);
 
 int MusicSession_getTrackCount(void);
 
+// Returns the track at `index` (0-based) of the queue, or NULL when the index is out of the queue
+const PlaylistTrack* MusicSession_getTrack(int index);
+
+// Returns the 0-based index of the current track, or -1 without a queue
+int MusicSession_getCurrentIndex(void);
+
+// Plays the track at `index` (0-based) of the queue.
+// Returns: true when a track plays
+bool MusicSession_playTrack(int index);
+
 bool MusicSession_isShuffle(void);
 bool MusicSession_isRepeat(void);
 void MusicSession_toggleShuffle(void);

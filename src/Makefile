@@ -238,7 +238,7 @@ LOCAL_SRC = \
     browser_nav.cpp ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/page/list_screen_controller.cpp ui/quit_dialog_page.cpp ui/confirm_dialog_page.cpp ui/wifi_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
     ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/podcast_page.cpp \
     ui/settings_page.cpp ui/errors_page.cpp ui/about_page.cpp ui/app_update_page.cpp ui/ytdlp_install_page.cpp ui/file_browser_page.cpp \
-    ui/playlists_page.cpp ui/add_to_playlist_page.cpp ui/playlist_tracks_page.cpp ui/text_input_page.cpp ui/downloader_page.cpp \
+    ui/playlists_page.cpp ui/sub_list_page.cpp ui/music_queue_page.cpp ui/add_to_playlist_page.cpp ui/playlist_tracks_page.cpp ui/text_input_page.cpp ui/downloader_page.cpp \
     ui/main_menu_page.cpp \
     ui/view/ui_view.cpp ui/view/ui_layout_context.cpp ui/view/ui_compositor.cpp \
     ui/view/text_view.cpp ui/view/title_text_view.cpp ui/view/list_row_view.cpp ui/view/list_view.cpp \

@@ -267,6 +267,25 @@ int MusicSession_getTrackCount(void) {
     return queue.track_count;
 }
 
+const PlaylistTrack* MusicSession_getTrack(int index) {
+    return Playlist_getTrack(&queue, index);
+}
+
+int MusicSession_getCurrentIndex(void) {
+    return queue.track_count > 0 ? queue.current_index : -1;
+}
+
+bool MusicSession_playTrack(int index) {
+    if (index < 0 || index >= queue.track_count) return false;
+    MusicSession_savePosition();
+    Player_stop();
+    if (Playlist_startWithRecovery(&queue, index, current_step(), start_track, NULL) < 0) {
+        end_queue();
+        return false;
+    }
+    return true;
+}
+
 bool MusicSession_isShuffle(void) {
     return shuffle_enabled;
 }

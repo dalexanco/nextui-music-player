@@ -131,6 +131,7 @@ Common key map across sources: `A` primary verb, `B` back, `X` sub-list, `Y` opt
 
 **1.5 Queue (X)** — new native sub-list page [`tpl-sousliste`], reached from the player. First use of the shared
 `SubListPage` (title + kind, full-width rows, playing indicator).
+- **Status: done (built, not validated on device; not reachable yet)** — `SubListPage` + `SubListSource` (`ui/sub_list_page.*`: title, small kind label after the title, one-line full-width rows, optional right value, playing indicator that follows the source every 500 ms, `A` verb configurable, empty message) and `makeMusicQueuePage()` (`ui/music_queue_page.*`, backed by new `MusicSession_getTrack/getCurrentIndex/playTrack`). The legacy player cannot open a page, so the queue is wired to `X` in 1.6.
 
 **1.6 Music player** — native page replacing `ui_music_playing.c` (429 lines): art on the right with fade, text, chips,
 progress row. Spectrum removed here. Lyrics stay a full-page mode until 1.8.
