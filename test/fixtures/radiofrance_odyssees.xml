@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:pa="http://podcastaddict.com" xmlns:podcastRF="http://radiofrance.fr/Lancelot/Podcast#" xmlns:googleplay="http://www.google.com/schemas/play-podcasts/1.0" version="2.0">
+  <channel>
+    <title>Les Odyssées</title>
+    <link>https://www.radiofrance.fr/franceinter/podcasts/les-odyssees</link>
+    <description>France Inter invite les enfants de 7 à 12 ans à se plonger dans les aventures des grandes figures de l'histoire. 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr/franceinter/podcasts/les-odyssees?at_campaign=desc_podcast&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+    <language>fr</language>
+    <copyright>Radio France</copyright>
+    <lastBuildDate>Tue, 24 Nov 2026 15:53:35 +0100</lastBuildDate>
+    <generator>Radio France</generator>
+    <image>
+      <url>https://www.radiofrance.fr/s3/cruiser-production-eu3/2026/04/2bab1da1-f313-4183-88f3-d31acfdb9079/1400x1400_sc_carre-les-odyssees-avril-2026.jpg?1795532015030</url>
+      <title>Les Odyssées</title>
+      <link>https://www.radiofrance.fr/franceinter/podcasts/les-odyssees</link>
+    </image>
+    <itunes:author>France Inter</itunes:author>
+    <itunes:category text="Society &amp; Culture"/>
+    <itunes:explicit>no</itunes:explicit>
+    <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2026/04/2bab1da1-f313-4183-88f3-d31acfdb9079/1400x1400_sc_carre-les-odyssees-avril-2026.jpg?1795532015030"/>
+    <itunes:owner>
+      <itunes:email>podcast@radiofrance.com</itunes:email>
+      <itunes:name>Radio France</itunes:name>
+    </itunes:owner>
+    <itunes:subtitle>Les Odyssées</itunes:subtitle>
+    <itunes:summary>France Inter invite les enfants de 7 à 12 ans à se plonger dans les aventures des grandes figures de l'histoire. 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr/franceinter/podcasts/les-odyssees?at_campaign=desc_podcast&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+    <itunes:new-feed-url>https://radiofrance-podcast.net/podcast09/35099478-7c72-4f9e-a6de-1b928400e9e5/podcast_c361798b-d6e3-4282-ba0a-ebb051b9e424.xml</itunes:new-feed-url>
+    <pa:new-feed-url>https://radiofrance-podcast.net/podcast09/d4463877-caa3-4507-9399-f5eb00fde027/podcast_c361798b-d6e3-4282-ba0a-ebb051b9e424.xml</pa:new-feed-url>
+    <podcastRF:originStation>1</podcastRF:originStation>
+    <googleplay:block>yes</googleplay:block>
+        <item>
+      <title>Camille du Gast, à toute allure vers la liberté ! </title>
+      <link>https://www.radiofrance.fr</link>
+      <description>durée : 00:12:08  - Les Odyssées - Un grand bravo aux enfants de l'école Chasles Le Roux de Boisemont (Val d'Oise), vainqueurs du concours de l'Ecole des Odyssées 2026 ! Ils nous emmènent à la Belle Epoque, à la découverte de l'incroyable vie de Camille du Gast, celle que l'on surnommait "la walkyrie de la mécanique" ! 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+      <author>podcast@radiofrance.com (Radio France)</author>
+      <category>Society &amp; Culture</category>
+      <enclosure url="https://proxycast.radiofrance.fr/0760f712-f39e-4aba-a3f2-891453f91f66/c361798b-d6e3-4282-ba0a-ebb051b9e424/3252b6a1-aaff-46b3-b4ec-0072b51417ec/26819-03.07.2026-ITEMA_24582044-2026F35387E0019-NET_MFI_A370722B-F326-4380-A75F-6C8EFB323C63-27-1aa75f329eb63cff085d1aca0ac65091.m4a" length="11648000" type="audio/x-m4a"/>
+      <guid isPermaLink="false">2b7b7ad9-19e1-40c5-b053-d1d66de28c92</guid>
+      <pubDate>Fri, 24 Jul 2026 04:42:00 +0200</pubDate>
+      <podcastRF:businessReference>35387</podcastRF:businessReference>
+      <podcastRF:magnetothequeID>2026F35387E0019</podcastRF:magnetothequeID>
+      <itunes:title>Camille du Gast, à toute allure vers la liberté ! </itunes:title>
+      <itunes:author>France Inter</itunes:author>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:keywords>camille, du, gast, toute, allure, vers, la, liberté</itunes:keywords>
+      <itunes:subtitle>Camille du Gast, à toute allure vers la liberté ! </itunes:subtitle>
+      <itunes:summary>durée : 00:12:08  - Les Odyssées - Un grand bravo aux enfants de l'école Chasles Le Roux de Boisemont (Val d'Oise), vainqueurs du concours de l'Ecole des Odyssées 2026 ! Ils nous emmènent à la Belle Epoque, à la découverte de l'incroyable vie de Camille du Gast, celle que l'on surnommait "la walkyrie de la mécanique" ! 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+      <itunes:duration>00:12:08</itunes:duration>
+      <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2026/04/2bab1da1-f313-4183-88f3-d31acfdb9079/1400x1400_sc_carre-les-odyssees-avril-2026.jpg"/>
+      <googleplay:block>yes</googleplay:block>
+    </item>
+    <item>
+      <title>Alice au pays des merveilles</title>
+      <link>https://www.radiofrance.fr</link>
+      <description>durée : 00:16:10  - Les Odyssées - En plongeant dans un terrier pour suivre un lapin en retard, Alice ne sait pas encore qu'un tourbillon d'aventures l'attendent ! Grâce à des personnages tous plus zinzins les uns que les autres, notre valeureuse aventurière va enfin découvrir qui elle est... 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+      <author>podcast@radiofrance.com (Radio France)</author>
+      <category>Society &amp; Culture</category>
+      <enclosure url="https://proxycast.radiofrance.fr/0760f712-f39e-4aba-a3f2-891453f91f66/c361798b-d6e3-4282-ba0a-ebb051b9e424/3c6c1c4e-cd08-4bef-905d-c533a7b69200/26819-07.07.2026-ITEMA_24585811-2026F35387E0016-NET_MFI_FCED4070-0B26-4DE8-90D6-89DD12B91974-27-75a50112ebdc06e01c4e98ffc450d09d.m4a" length="15520000" type="audio/x-m4a"/>
+      <guid isPermaLink="false">e7fc1318-7d7b-488e-8ac1-bcee46f4828e</guid>
+      <pubDate>Thu, 23 Jul 2026 04:42:00 +0200</pubDate>
+      <podcastRF:businessReference>35387</podcastRF:businessReference>
+      <podcastRF:magnetothequeID>2026F35387E0016</podcastRF:magnetothequeID>
+      <itunes:title>Alice au pays des merveilles</itunes:title>
+      <itunes:author>France Inter</itunes:author>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:keywords>alice, au, pays, des, merveilles</itunes:keywords>
+      <itunes:subtitle>Alice au pays des merveilles</itunes:subtitle>
+      <itunes:summary>durée : 00:16:10  - Les Odyssées - En plongeant dans un terrier pour suivre un lapin en retard, Alice ne sait pas encore qu'un tourbillon d'aventures l'attendent ! Grâce à des personnages tous plus zinzins les uns que les autres, notre valeureuse aventurière va enfin découvrir qui elle est... 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+      <itunes:duration>00:16:10</itunes:duration>
+      <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2026/07/dea78fe8-ab75-4df8-b4bf-52a95950cdb2/1400x1400_sc_fi-odyssees-0626-contes-3000x3000.jpg"/>
+      <googleplay:block>yes</googleplay:block>
+    </item>
+    <item>
+      <title>L'Île au trésor </title>
+      <link>https://www.radiofrance.fr</link>
+      <description>durée : 00:16:17  - Les Odyssées - Dans le roman d'aventure "L'Île au trésor" de Robert Louis Stevenson, il y a des pirates  et autres gens de mer balafrés, de vrais marins  et  Jim, un jeune et courageux aventurier à la recherche du fameux trésor du terrible capitaine Flint. 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</description>
+      <author>podcast@radiofrance.com (Radio France)</author>
+      <category>Society &amp; Culture</category>
+      <enclosure url="https://proxycast.radiofrance.fr/0760f712-f39e-4aba-a3f2-891453f91f66/c361798b-d6e3-4282-ba0a-ebb051b9e424/53ebfd3a-0fc2-4f1b-a9a6-1a61a8178c75/26819-07.07.2026-ITEMA_24585811-2026F35387E0018-NET_MFI_1C76AC02-94D3-4ABA-A43A-271B8C0ED21A-27-896ba4ca06e0d009b3a020e139f64a4b.m4a" length="15632000" type="audio/x-m4a"/>
+      <guid isPermaLink="false">30f1826f-7330-4144-9f1f-3143cd099704</guid>
+      <pubDate>Wed, 22 Jul 2026 04:42:00 +0200</pubDate>
+      <podcastRF:businessReference>35387</podcastRF:businessReference>
+      <podcastRF:magnetothequeID>2026F35387E0018</podcastRF:magnetothequeID>
+      <itunes:title>L'Île au trésor </itunes:title>
+      <itunes:author>France Inter</itunes:author>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:keywords>île, au, trésor</itunes:keywords>
+      <itunes:subtitle>L'Île au trésor </itunes:subtitle>
+      <itunes:summary>durée : 00:16:17  - Les Odyssées - Dans le roman d'aventure "L'Île au trésor" de Robert Louis Stevenson, il y a des pirates  et autres gens de mer balafrés, de vrais marins  et  Jim, un jeune et courageux aventurier à la recherche du fameux trésor du terrible capitaine Flint. 
+
+Vous aimez ce podcast ? Pour écouter tous les épisodes sans limite, rendez-vous sur &lt;a href="https://www.radiofrance.fr?at_campaign=desc_episode&amp;at_medium=lien_RSS"&gt;Radio France&lt;/a&gt;</itunes:summary>
+      <itunes:duration>00:16:17</itunes:duration>
+      <itunes:image href="https://www.radiofrance.fr/s3/cruiser-production-eu3/2026/07/dea78fe8-ab75-4df8-b4bf-52a95950cdb2/1400x1400_sc_fi-odyssees-0626-contes-3000x3000.jpg"/>
+      <googleplay:block>yes</googleplay:block>
+    </item>
+  </channel>
+</rss>
