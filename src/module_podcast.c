@@ -173,16 +173,85 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
 }
 
 
-ModuleExitReason PodcastModule_run(DisplayContext* display) {
-    Podcast_init();
-    DisplayHelper_addRecreatedCallback(display_recreated);
+// Where the next run of the module starts. The native pages start it on one screen and take the
+// screen back when the module returns to its menu.
+static PodcastEntry next_entry = PODCAST_ENTRY_MENU;
+static int next_entry_arg = 0;
 
+void PodcastModule_setEntry(PodcastEntry entry, int arg) {
+    next_entry = entry;
+    next_entry_arg = arg;
+}
+
+void PodcastModule_autoRefresh(void) {
     // Auto-check for new episodes once per app session
     static bool auto_refreshed = false;
     if (!auto_refreshed && Wifi_isConnected() && Podcast_getSubscriptionCount() > 0) {
         Podcast_startRefreshAll();
         auto_refreshed = true;
     }
+}
+
+// Plays the episode of an entry of Continue Listening: loads it, seeks to its saved position.
+// Returns false (with a toast) where the episode cannot play, thus `state` stays as it is.
+static bool start_continue_listening(int cl_index, PodcastInternalState* state) {
+    ContinueListeningEntry* cl_entry = Podcast_getContinueListening(cl_index);
+    if (!cl_entry) return false;
+    int fi = Podcast_findFeedIndex(cl_entry->feed_url);
+    if (fi < 0) {
+        Toast_show("Podcast not found", TOAST_DURATION);
+        return false;
+    }
+    PodcastFeed* feed = Podcast_getSubscription(fi);
+    // Find episode index by guid
+    int ep_idx = -1;
+    if (feed) {
+        for (int e = 0; e < feed->episode_count; e++) {
+            PodcastEpisode* ep = Podcast_getEpisode(fi, e);
+            if (ep && strcmp(ep->guid, cl_entry->episode_guid) == 0) {
+                ep_idx = e;
+                break;
+            }
+        }
+    }
+    if (!feed || ep_idx < 0 || !Podcast_episodeFileExists(feed, ep_idx)) {
+        Toast_show("Episode not available", TOAST_DURATION);
+        return false;
+    }
+    Background_stopAll();
+    podcast_current_feed_index = fi;
+    podcast_current_episode_index = ep_idx;
+    int load_result = Podcast_loadAndSeek(feed, ep_idx);
+    if (load_result < 0) {
+        Toast_show("Failed to play", TOAST_DURATION);
+        return false;
+    }
+    Podcast_clearTitleScroll();
+    ModuleCommon_recordInputTime();
+    last_progress_save_time = SDL_GetTicks();
+    if (load_result == 1) {
+        show_seek_toast(fi, ep_idx);
+        *state = PODCAST_INTERNAL_SEEKING;
+    } else {
+        Player_play();
+        *state = PODCAST_INTERNAL_PLAYING;
+    }
+    // Update continue listening (move to top)
+    Podcast_updateContinueListening(feed->feed_url, feed->feed_id,
+        cl_entry->episode_guid, cl_entry->episode_title,
+        feed->title, feed->artwork_url);
+    return true;
+}
+
+ModuleExitReason PodcastModule_run(DisplayContext* display) {
+    Podcast_init();
+    DisplayHelper_addRecreatedCallback(display_recreated);
+    PodcastModule_autoRefresh();
+
+    const PodcastEntry entry = next_entry;
+    const int entry_arg = next_entry_arg;
+    next_entry = PODCAST_ENTRY_MENU;
+    next_entry_arg = 0;
 
     PodcastInternalState state = PODCAST_INTERNAL_MENU;
     ModuleExitReason reason = MODULE_EXIT_TO_MENU;
@@ -198,10 +267,25 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
     podcast_menu_scroll_px = 0;
 
     // Re-enter playing state if podcast is playing in background
-    if (Background_getActive() == BG_PODCAST && Podcast_isActive()) {
+    if ((entry == PODCAST_ENTRY_MENU || entry == PODCAST_ENTRY_PLAYER)
+        && Background_getActive() == BG_PODCAST && Podcast_isActive()) {
         Background_setActive(BG_NONE);
         ModuleCommon_setAutosleepDisabled(true);
         state = PODCAST_INTERNAL_PLAYING;
+    } else if (entry == PODCAST_ENTRY_EPISODES) {
+        podcast_current_feed_index = entry_arg;
+        ListNav_scrollToTop(&podcast_episodes_nav);
+        podcast_episodes_scroll_px = 0;
+        state = PODCAST_INTERNAL_EPISODES;
+    } else if (entry == PODCAST_ENTRY_MANAGE) {
+        ListNav_scrollToTop(&podcast_manage_nav);
+        state = PODCAST_INTERNAL_MANAGE;
+    } else if (entry == PODCAST_ENTRY_QUEUE) {
+        ListNav_scrollToTop(&podcast_queue_nav);
+        state = PODCAST_INTERNAL_DOWNLOAD_QUEUE;
+    } else if (entry == PODCAST_ENTRY_CONTINUE) {
+        // A failed start leaves the state on the menu, which returns to the native page below
+        if (start_continue_listening(entry_arg, &state)) Background_setActive(BG_NONE);
     }
 
     // The spectrum belongs to the playing screen alone. One check of the state
@@ -327,52 +411,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     dirty = 1;
                 } else if (podcast_menu_nav.selected < cl_count) {
                     // Continue Listening item — play directly
-                    ContinueListeningEntry* cl_entry = Podcast_getContinueListening(podcast_menu_nav.selected);
-                    if (cl_entry) {
-                        int fi = Podcast_findFeedIndex(cl_entry->feed_url);
-                        if (fi >= 0) {
-                            PodcastFeed* feed = Podcast_getSubscription(fi);
-                            // Find episode index by guid
-                            int ep_idx = -1;
-                            if (feed) {
-                                for (int e = 0; e < feed->episode_count; e++) {
-                                    PodcastEpisode* ep = Podcast_getEpisode(fi, e);
-                                    if (ep && strcmp(ep->guid, cl_entry->episode_guid) == 0) {
-                                        ep_idx = e;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (feed && ep_idx >= 0 && Podcast_episodeFileExists(feed, ep_idx)) {
-                                Background_stopAll();
-                                podcast_current_feed_index = fi;
-                                podcast_current_episode_index = ep_idx;
-                                int load_result = Podcast_loadAndSeek(feed, ep_idx);
-                                if (load_result >= 0) {
-                                    Podcast_clearTitleScroll();
-                                    ModuleCommon_recordInputTime();
-                                    last_progress_save_time = SDL_GetTicks();
-                                    if (load_result == 1) {
-                                        show_seek_toast(fi, ep_idx);
-                                        state = PODCAST_INTERNAL_SEEKING;
-                                    } else {
-                                        Player_play();
-                                        state = PODCAST_INTERNAL_PLAYING;
-                                    }
-                                    // Update continue listening (move to top)
-                                    Podcast_updateContinueListening(feed->feed_url, feed->feed_id,
-                                        cl_entry->episode_guid, cl_entry->episode_title,
-                                        feed->title, feed->artwork_url);
-                                } else {
-                                    Toast_show("Failed to play", TOAST_DURATION);
-                                }
-                            } else {
-                                Toast_show("Episode not available", TOAST_DURATION);
-                            }
-                        } else {
-                            Toast_show("Podcast not found", TOAST_DURATION);
-                        }
-                    }
+                    start_continue_listening(podcast_menu_nav.selected, &state);
                 } else {
                     // Subscription item — go to episodes
                     podcast_current_feed_index = podcast_menu_nav.selected - cl_count;
@@ -1007,6 +1046,16 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     continue;
                 }
             }
+        }
+
+        // A module that a native page started gives the screen back at its menu
+        if (state == PODCAST_INTERNAL_MENU && entry != PODCAST_ENTRY_MENU) {
+            Podcast_clearTitleScroll();
+            Podcast_saveSubscriptions();
+            Podcast_flushProgress();
+            if (Podcast_isActive()) Background_setActive(BG_PODCAST);
+            Spectrum_quit();
+            break;
         }
 
         // Handle power management
