@@ -214,6 +214,21 @@ the file is deleted when the last one moves.
 - **Status 3.4b (manage, search, top shows; legacy module removed): done, with deviations (built, NOT validated on device)** — `PodcastManagePage` (Search, Top Shows; both after the Wi-Fi dialog; Search asks for the text with `TextInputPage`, an empty text is a cancel) and one `PodcastCatalogPage` for the answer to a search and for the charts (`ui/podcast_catalog_page.*`): rows with a check on the shows already subscribed, `A` subscribes (the words `Subscribing...` reach the screen two frames before the blocking call) or asks to unsubscribe, `X` refreshes the charts, the panel of the new look shows tile or cover, author, genre and `Subscribed`; the cover comes from the cache `.cache/podcast/<itunes id>.jpg` and, once the cursor rested for 20 frames, from the network (`podcast_art.*`: `fetchPodcastCover`, `isPodcastImageComplete`, `getPodcastCoverPath`). `ui_podcast.c` / `ui_podcast.h` (1748 lines), `module_podcast.c`'s screen loop, `podcast_episode_layout.*` and its test, and the temporary `PodcastLegacyPage` are deleted; `module_podcast.c` keeps only the playback tick, the background tick and the once-per-session refresh. `podcast.c` / `podcast_rss.c` / `podcast_search.c` are untouched but for two small accessors (3.2) and the removal of the call to the thumbnail cache. Deviations: (1) a search cannot be redone from its results (go back to Manage), as before; (2) no thumbnails in the rows (the old list drew round thumbnails of the covers): the covers show in the panel only; (3) the old loading screen with its own text is the empty state of the list (`Searching...`, `Loading...`, then the error or `No results found`).
 - Risk: size. Split 3.4 per screen, each its own PR. Keep download / RSS code untouched.
 
+### Fix round 1 — after the e2e review of the simulator (phases 0–3)
+
+> **Status: done in the simulator, NOT validated on device.** One commit per item on `feat/ui-redesign`.
+
+- **Hint bar rule** (see §1): three actions at most, `Y OPTIONS` for the rest (`ChoiceOptionsPage`, `openActionOptions()`); fixes the missing `A`
+  on the podcasts and episodes lists and the colliding groups of Add Stations; help texts updated.
+- **Rounded surfaces:** `renderRoundedRect()` / `RoundedRectView` (anti-aliased, edge, alpha; `test_rounded_rect`). `DialogFrameView` uses it with *Source colours*
+  on: rounded dialogs with a thin accent edge, the options panel with no edge (`tpl-options`: rows of 84 px, accent band only behind a value,
+  `OptionRowView`); the text at the left of the options pages (`OptionsHeaderView`) stops where the panel starts and scrolls. A tall help dialog keeps the hint bar visible.
+  *Source colours* off keeps the square look.
+- **Players with the setting off:** flat background (no art fade tile, art with no fade); chips are a 2 px rounded outline (format, OFFLINE in the error colour) or a translucent pill.
+- **Detail panel:** no title over the art, lines that scroll, times under the position when they do not fit, no generic counters, no panel on an empty list,
+  none on the folders of the file browser; the icon cache gives each (icon, role, selected) its own surface (dark folders).
+- **Titles and margins:** Music, Radio, Podcasts; 24 px of 768 under the status row with the large title; one radio verb (LISTEN).
+
 ### Phase 4 — Audiobook (PR #31)
 
 **4.1 Rebase `feat/audiobook`** on the migrated base; the Audiobook list and player use `DetailPanelView`, the shared player
