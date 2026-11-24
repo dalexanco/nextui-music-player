@@ -232,9 +232,17 @@ private:
     /** Says what the import of the files on the card did, then lists the shows again. */
     void sayImportResult() {
         const PodcastImportStatus status = PodcastImport_getStatus();
-        std::string text = std::to_string(status.added) + (status.added == 1 ? " podcast added" : " podcasts added");
-        if (status.duplicates > 0) text += ", " + std::to_string(status.duplicates) + " already subscribed";
-        if (status.failed + status.invalid_files > 0) text += ", " + std::to_string(status.failed + status.invalid_files) + " failed, see Import from SD card";
+        // Short: a longer toast scrolls. Import from SD card lists each feed.
+        std::string text;
+        const auto add = [&text](int count, const char* what) {
+            if (count <= 0) return;
+            if (!text.empty()) text += ", ";
+            text += std::to_string(count) + " " + what;
+        };
+        add(status.added, "added");
+        add(status.duplicates, "already");
+        add(status.failed + status.invalid_files, "failed");
+        if (text.empty()) text = "Nothing imported";
         Toast_show(text.c_str(), TOAST_DURATION);
         Podcast_saveSubscriptions();
         reload();

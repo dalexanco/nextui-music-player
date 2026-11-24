@@ -187,8 +187,7 @@ URL=https://radiofrance-podcast.net/podcast09/podcast_a80ecbd5-df3d-4c9d-bee7-4e
 | `src/module_podcast.c` | `PodcastModule_autoRefresh()`: creates the folder, then starts the import if files wait and Wi-Fi is on, else refreshes as before. |
 
 - **Triggers**: (1) the Podcasts page opens and Wi-Fi is on: the import starts by itself if the
-  folder holds a file, the page says « Importing podcasts… » then the count (« 2 podcasts added, 1
-  failed, see Import from SD card »); (2) `Y` → `Search and top shows` → `Import from SD card`
+  folder holds a file, the page says « Importing podcasts… » then the count (« 2 added, 1 already, 1 failed »); (2) `Y` → `Search and top shows` → `Import from SD card`
   (after the Wi-Fi dialog) shows the progress and the result of each feed, and reads the reports.
 - **No blocking**: the work is on a thread, as the search and the refresh are. The page polls
   `PodcastImport_getStatus()`. Leaving the page does not stop the import: the module keeps itself
