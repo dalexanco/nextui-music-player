@@ -728,7 +728,11 @@ PodcastFeed* Podcast_getSubscription(int index) {
 }
 
 int Podcast_subscribe(const char* feed_url) {
-    if (!feed_url || subscription_count >= PODCAST_MAX_SUBSCRIPTIONS) {
+    if (!feed_url) {
+        return -1;
+    }
+    if (subscription_count >= PODCAST_MAX_SUBSCRIPTIONS && !Podcast_isSubscribed(feed_url)) {
+        snprintf(error_message, sizeof(error_message), "Too many podcasts");
         return -1;
     }
 
@@ -776,6 +780,15 @@ int Podcast_subscribe(const char* feed_url) {
         LOG_error("[Podcast] Failed to parse feed: %s\n", feed_url);
         free(temp_episodes);
         snprintf(error_message, sizeof(error_message), "Invalid RSS feed");
+        return -1;
+    }
+
+    // A feed that holds no episode with an audio file is no podcast: a page of HTML that has
+    // a <title> parses too
+    if (episode_count == 0) {
+        LOG_error("[Podcast] No episode with an enclosure in: %s\n", feed_url);
+        free(temp_episodes);
+        snprintf(error_message, sizeof(error_message), "No episodes in the feed");
         return -1;
     }
 
