@@ -67,7 +67,7 @@ public:
             auto genre = std::make_shared<TextView>(Fonts_getTiny(), false);
             genre->setText(station.genre);
             genre->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            row->setRightView(std::move(genre));
+            row->setRightText(std::move(genre));
         }
         return row;
     }

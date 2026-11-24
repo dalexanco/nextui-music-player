@@ -35,11 +35,29 @@ void ListRowView::setSelected(bool newSelected) {
 
 void ListRowView::setRightView(std::shared_ptr<UiView> view) {
     if (view == rightView) return;
+    rightText.reset();
+    rightTextRecolored = false;
     rightView = std::move(view);
     dirty = true;
 }
 
+void ListRowView::setRightText(std::shared_ptr<TextView> text) {
+    setRightView(text);
+    rightText = std::move(text);
+}
+
 void ListRowView::layout(UiLayoutContext& context) {
+    extendedPill = rightView && Theme_isSourceColoursEnabled();
+    if (rightText) {
+        if (extendedPill) {
+            rightText->setColor(selected ? Theme_getColor(THEME_ROLE_PRIMARY, true)
+                                         : Theme_getColor(THEME_ROLE_SECONDARY, false));
+            rightTextRecolored = true;
+        } else if (rightTextRecolored) {
+            rightText->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+            rightTextRecolored = false;
+        }
+    }
     // A row is as high as a selection pill
     const UiSize size       = {context.getMaxSize().w, std::min(context.getMaxSize().h, SCALE1(PILL_SIZE))};
     const int padding = SCALE1(BUTTON_PADDING);
@@ -69,8 +87,10 @@ void ListRowView::layout(UiLayoutContext& context) {
 
     // A text that does not fit takes all of its space, and the pill with it
     const int textSpace    = textRect.w + padding * 2;
-    const int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2);
-    const int newBandWidth = rightView ? size.w : 0;
+    int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2);
+    // The extended pill takes the whole row, thus the right view is on it and no band shows
+    if (extendedPill) newPillWidth = size.w;
+    const int newBandWidth = rightView && !extendedPill ? size.w : 0;
     if (newPillWidth != pillWidth || size.h != pillHeight || newBandWidth != bandWidth) {
         pillWidth  = newPillWidth;
         pillHeight = size.h;

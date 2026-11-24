@@ -238,7 +238,7 @@ public:
             if (row.getValue) {
                 auto value = std::make_shared<TextView>(Fonts_getMedium(), false);
                 value->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-                view->setRightView(value);
+                view->setRightText(value);
                 values[item] = std::move(value);
             }
         }
