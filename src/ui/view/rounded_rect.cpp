@@ -51,3 +51,30 @@ void renderRoundedRect(uint32_t* pixels, int width, int height, int pitchPixels,
         }
     }
 }
+
+void applyRoundedCorners(uint32_t* pixels, int width, int height, int pitchPixels, int radius) {
+    if (radius <= 0 || width <= 0 || height <= 0) return;
+    const float w = static_cast<float>(width);
+    const float h = static_cast<float>(height);
+    const float r = static_cast<float>(radius);
+    // Only the corner squares can lose coverage
+    const int reach = std::min(radius + 1, std::min(width, height) / 2 + 1);
+    for (int y = 0; y < height; y++) {
+        const bool cornerRow = y < reach || y >= height - reach;
+        if (!cornerRow) continue;
+        uint32_t* row = pixels + static_cast<size_t>(y) * static_cast<size_t>(pitchPixels);
+        for (int x = 0; x < width; x++) {
+            if (x >= reach && x < width - reach) {
+                x = width - reach - 1;  // jumps over the middle of the row
+                continue;
+            }
+            const float c = coverage(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f, 0, 0, w, h, r);
+            if (c >= 1.0f) continue;
+            const uint32_t pixel = row[x];
+            const auto scaled    = [&](int shift) {
+                return static_cast<uint32_t>(static_cast<float>((pixel >> shift) & 0xff) * c + 0.5f);
+            };
+            row[x] = (scaled(24) << 24) | (scaled(16) << 16) | (scaled(8) << 8) | scaled(0);
+        }
+    }
+}

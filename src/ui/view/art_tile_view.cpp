@@ -69,6 +69,7 @@ void ArtTileFallbackView::draw(UiDrawContext& context) {
 void ArtTileView::layout(UiLayoutContext& context) {
     const UiSize space = context.getMaxSize();
     if (bitmapView.hasBitmap()) {
+        bitmapView.setCornerRadius(SCALE1(8));
         context.layoutChild(bitmapView, SDL_Rect{0, 0, space.w, space.h});
         return;
     }

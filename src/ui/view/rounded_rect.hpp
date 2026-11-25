@@ -26,4 +26,12 @@ struct RoundedRectStyle {
  */
 void renderRoundedRect(uint32_t* pixels, int width, int height, int pitchPixels, const RoundedRectStyle& style);
 
+/**
+ * Rounds the four corners of a rendered bitmap in place: each pixel of ARGB8888 with premultiplied
+ * alpha is multiplied by the anti-aliased coverage of the rounded rectangle that fills the bitmap,
+ * so the corners fade to transparent and the rest is untouched. `radius` is in pixels, clamped to
+ * half the smaller side; a radius of 0 or less changes nothing.
+ */
+void applyRoundedCorners(uint32_t* pixels, int width, int height, int pitchPixels, int radius);
+
 #endif

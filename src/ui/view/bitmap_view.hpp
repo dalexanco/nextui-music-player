@@ -30,6 +30,12 @@ public:
      */
     bool loadMemory(const void* data, size_t size);
 
+    /**
+     * Rounds the four corners of the bitmap with an anti-aliased radius of `radius` pixels, which
+     * fade to transparent. 0, the default, keeps them square.
+     */
+    void setCornerRadius(int newRadius);
+
     bool hasBitmap() const { return bitmap != nullptr; }
 
     bool isDirty() const override { return dirty; }
@@ -37,6 +43,7 @@ public:
 
 private:
     SDL_Surface* bitmap = nullptr;
+    int cornerRadius    = 0;
     bool dirty          = true;
 };
 

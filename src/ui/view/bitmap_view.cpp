@@ -2,6 +2,8 @@
 
 #include <SDL2/SDL_image.h>
 
+#include "ui/view/rounded_rect.hpp"
+
 BitmapView::~BitmapView() { SDL_FreeSurface(bitmap); }
 
 void BitmapView::setBitmap(SDL_Surface* newBitmap) {
@@ -9,6 +11,12 @@ void BitmapView::setBitmap(SDL_Surface* newBitmap) {
     SDL_FreeSurface(bitmap);
     bitmap = newBitmap;
     dirty  = true;
+}
+
+void BitmapView::setCornerRadius(int newRadius) {
+    if (newRadius == cornerRadius) return;
+    cornerRadius = newRadius;
+    dirty        = true;
 }
 
 bool BitmapView::loadFile(const char* path) {
@@ -30,4 +38,8 @@ void BitmapView::draw(UiDrawContext& context) {
     if (!surface) return;
     SDL_SetSurfaceBlendMode(bitmap, SDL_BLENDMODE_BLEND);
     SDL_BlitScaled(bitmap, nullptr, surface, nullptr);
+    // The surface of a view is ARGB8888 with premultiplied alpha, cleared before each draw
+    if (cornerRadius > 0 && surface->format->format == SDL_PIXELFORMAT_ARGB8888) {
+        applyRoundedCorners(static_cast<uint32_t*>(surface->pixels), surface->w, surface->h, surface->pitch / 4, cornerRadius);
+    }
 }

@@ -86,6 +86,56 @@ TEST(radius_is_clamped_to_half_the_smaller_side) {
     CHECK_EQ_INT(alpha(pixels[0]), 0);
 }
 
+TEST(rounding_a_bitmap_fades_the_corners_and_keeps_the_rest) {
+    const int w = 40, h = 30, pitch = 44;
+    std::vector<uint32_t> pixels(static_cast<size_t>(pitch) * h, 0xff204060);
+    for (int y = 0; y < h; y++) pixels[static_cast<size_t>(y) * pitch + w] = 0x12345678;  // padding
+    applyRoundedCorners(pixels.data(), w, h, pitch, 8);
+    // The corner pixel is fully transparent, with its color channels premultiplied to 0
+    CHECK_EQ_INT(pixels[0], 0);
+    CHECK_EQ_INT(pixels[static_cast<size_t>(w - 1)], 0);
+    CHECK_EQ_INT(pixels[static_cast<size_t>(h - 1) * pitch], 0);
+    CHECK_EQ_INT(pixels[static_cast<size_t>(h - 1) * pitch + w - 1], 0);
+    // The four corners are the same by symmetry
+    // A pixel on the arc is partly transparent, and its colors fade with its alpha
+    bool partial = false;
+    for (int x = 0; x < 8; x++) {
+        const uint32_t pixel = pixels[static_cast<size_t>(3) * pitch + x];
+        const uint32_t alpha = pixel >> 24;
+        if (alpha > 0 && alpha < 0xff) {
+            partial = true;
+            CHECK(((pixel >> 16) & 0xff) < 0x20);
+            CHECK(((pixel >> 16) & 0xff) > 0);
+        }
+    }
+    CHECK(partial);
+    // The middle, the straight sides and the padding are untouched
+    CHECK_EQ_INT(pixels[static_cast<size_t>(15) * pitch + 20], 0xff204060);
+    CHECK_EQ_INT(pixels[static_cast<size_t>(15) * pitch], 0xff204060);
+    CHECK_EQ_INT(pixels[static_cast<size_t>(0) * pitch + 20], 0xff204060);
+    CHECK_EQ_INT(pixels[static_cast<size_t>(10) * pitch + w], 0x12345678);
+}
+
+TEST(rounding_with_no_radius_changes_nothing) {
+    std::vector<uint32_t> pixels(20 * 20, 0xff102030);
+    applyRoundedCorners(pixels.data(), 20, 20, 20, 0);
+    for (uint32_t pixel : pixels) CHECK_EQ_INT(pixel, 0xff102030);
+}
+
+TEST(rounding_matches_the_corner_of_the_rounded_rect) {
+    // The same radius gives the same alpha as the rounded rectangle, so an image and a tile agree
+    const int s = 60;
+    std::vector<uint32_t> image(static_cast<size_t>(s) * s, 0xffffffff);
+    applyRoundedCorners(image.data(), s, s, s, 10);
+    std::vector<uint32_t> rect(static_cast<size_t>(s) * s);
+    renderRoundedRect(rect.data(), s, s, s, RoundedRectStyle{SDL_Color{255, 255, 255, 255}, SDL_Color{0, 0, 0, 0}, 0, 10});
+    for (int i = 0; i < s * s; i++) {
+        const int a = static_cast<int>(image[static_cast<size_t>(i)] >> 24);
+        const int b = static_cast<int>(rect[static_cast<size_t>(i)] >> 24);
+        CHECK(std::abs(a - b) <= 1);
+    }
+}
+
 int main() {
     RUN(corner_pixel_is_transparent_and_the_middle_is_the_fill);
     RUN(straight_sides_are_opaque_up_to_the_last_pixel);
@@ -95,5 +145,8 @@ int main() {
     RUN(translucent_fill_is_premultiplied);
     RUN(padding_of_the_rows_is_not_touched);
     RUN(radius_is_clamped_to_half_the_smaller_side);
+    RUN(rounding_a_bitmap_fades_the_corners_and_keeps_the_rest);
+    RUN(rounding_with_no_radius_changes_nothing);
+    RUN(rounding_matches_the_corner_of_the_rounded_rect);
     return test_summary();
 }
