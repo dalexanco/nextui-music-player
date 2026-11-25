@@ -4,6 +4,7 @@
 #include "podcast.h"
 #include "music_session.h"
 #include "module_podcast.h"
+#include "audiobook_session.h"
 #include "module_common.h"
 
 static BackgroundPlayerType active_bg = BG_NONE;
@@ -30,6 +31,10 @@ void Background_stopAll(void) {
             Podcast_stop();
             Podcast_flushProgress();
             break;
+        case BG_AUDIOBOOK:
+            // Saves the place of the book, then stops it
+            AudiobookSession_stop();
+            break;
         case BG_NONE:
             break;
     }
@@ -47,6 +52,8 @@ bool Background_isPlaying(void) {
             return Radio_isActive();
         case BG_PODCAST:
             return Podcast_isActive();
+        case BG_AUDIOBOOK:
+            return AudiobookSession_isActive();
         case BG_NONE:
             break;
     }
@@ -73,6 +80,9 @@ void Background_tick(void) {
             break;
         case BG_PODCAST:
             PodcastModule_backgroundTick();
+            break;
+        case BG_AUDIOBOOK:
+            AudiobookSession_tick();
             break;
         case BG_NONE:
             break;

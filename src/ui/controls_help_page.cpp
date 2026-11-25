@@ -110,6 +110,9 @@ ThemeSource getHelpSource(HelpId helpId) {
         case HELP_PODCAST_EPISODES:
         case HELP_PODCAST_DOWNLOADS:
         case HELP_PODCAST_PLAYING:          return THEME_SOURCE_PODCAST;
+        case HELP_AUDIOBOOK_LIBRARY:
+        case HELP_AUDIOBOOK_CHAPTERS:
+        case HELP_AUDIOBOOK_PLAYING:        return THEME_SOURCE_AUDIOBOOK;
         case HELP_DEFAULT:
         case HELP_NONE:
         case HELP_MAIN_MENU:
