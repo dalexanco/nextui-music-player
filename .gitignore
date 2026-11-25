@@ -38,3 +38,6 @@ bin/wget
 /deps/zig/
 /deps/sqlite/
 /deps/downloads/
+
+# Audit screenshots of the UI redesign, kept local
+docs/audit/
