@@ -279,7 +279,7 @@ private:
 
     /** Returns the items of the rows, in order. */
     static std::vector<MenuItem> getRows() {
-        std::vector<MenuItem> rows = {MenuItem::Library, MenuItem::Radio, MenuItem::Podcast, MenuItem::Settings};
+        std::vector<MenuItem> rows = {MenuItem::Library, MenuItem::Podcast, MenuItem::Radio, MenuItem::Settings};
         const MenuItem playingItem = getPlayingItem();
         if (playingItem != MenuItem::None) rows.insert(rows.begin(), playingItem);
         return rows;

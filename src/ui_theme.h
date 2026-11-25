@@ -68,7 +68,7 @@ SDL_Color Theme_getDeep(ThemeSource source);
 //
 // The stack of pages sets the active source before each layout: enabled is the
 // "Source colours" setting, and source is the source of the top page.
-void Theme_setSourceColours(bool enabled, ThemeSource source);
+void Theme_setSource(ThemeSource source);
 
 // True while the "Source colours" setting is on for the layout that runs.
 bool Theme_isSourceColoursEnabled(void);

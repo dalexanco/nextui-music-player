@@ -137,14 +137,9 @@ std::string formatSize(long bytes) {
     return text;
 }
 
-void toggleSourceColours(HorizontalDirection) { Settings_toggleBool(&SETTING_SOURCE_COLOURS); }
-
-std::string getSourceColoursValue() { return Settings_getBool(&SETTING_SOURCE_COLOURS) ? "On" : "Off"; }
-
 enum class SettingItem : uint8_t {
     Errors,
     ScreenOff,
-    SourceColours,
     BassFilter,
     SoftLimiter,
     UpdateChannel,
@@ -166,8 +161,6 @@ struct SettingRow {
 
 constexpr SettingRow kRows[] = {
     {SettingItem::ScreenOff, [] { return std::string("Auto Screen Off"); }, getScreenOffValue, cycleScreenOff},
-    {SettingItem::SourceColours, [] { return std::string("Source colours"); }, getSourceColoursValue,
-     toggleSourceColours},
     {SettingItem::BassFilter, [] { return std::string("Bass Filter"); }, getBassFilterValue, cycleBassFilter},
     {SettingItem::SoftLimiter, [] { return std::string("Soft Limiter"); }, getSoftLimiterValue, cycleSoftLimiter},
     {SettingItem::UpdateChannel, [] { return std::string("Updates"); }, getUpdateChannelValue, cycleUpdateChannel},
@@ -363,7 +356,6 @@ private:
             case SettingItem::InputTest:   getNavigator().open(InputTestPage{}); break;
 #endif
             case SettingItem::ScreenOff:
-            case SettingItem::SourceColours:
             case SettingItem::BassFilter:
             case SettingItem::SoftLimiter:
             case SettingItem::UpdateChannel: break;

@@ -151,9 +151,7 @@ void PageStack::run(const UiPage& page, DisplayContext* display) {
     stack.setDimColor(getDimColor());
     stack.setBackgroundPalette([](ThemeSource source) -> std::optional<SourcePalette> {
         // The views read the accent of the pills at their layout, which comes after this call
-        const bool enabled = Settings_getBool(&SETTING_SOURCE_COLOURS);
-        Theme_setSourceColours(enabled, source);
-        if (!enabled) return std::nullopt;
+        Theme_setSource(source);
         return SourcePalette{Theme_getAccent(source), Theme_getDeep(source)};
     });
     // A screen-bound toast belongs to the screen that showed it

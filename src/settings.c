@@ -22,11 +22,6 @@ const BoolSetting SETTING_LYRICS_ENABLED = {
     .fallback = true,
 };
 
-const BoolSetting SETTING_SOURCE_COLOURS = {
-    .name     = "source_colours",
-    .fallback = false,
-};
-
 const IntSetting SETTING_BASS_FILTER_HZ = {
     .name     = "bass_filter_hz",
     .fallback = 120,
