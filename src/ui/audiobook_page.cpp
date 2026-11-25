@@ -119,6 +119,7 @@ public:
     }
 
     HelpId getHelpId() const override { return HELP_AUDIOBOOK_LIBRARY; }
+    ThemeSource getSource() const override { return THEME_SOURCE_AUDIOBOOK; }
 
     void onEnter() override {
         Library::getInstance().scan();

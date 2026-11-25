@@ -218,6 +218,7 @@ public:
     std::span<const ButtonRequest> getButtonRequests() const override { return kButtonRequests; }
 
     HelpId getHelpId() const override { return HELP_AUDIOBOOK_PLAYING; }
+    ThemeSource getSource() const override { return THEME_SOURCE_AUDIOBOOK; }
 
     void onEnter() override {
         Session& session = Session::getInstance();

@@ -61,6 +61,7 @@ public:
     }
 
     HelpId getHelpId() const override { return HELP_AUDIOBOOK_CHAPTERS; }
+    ThemeSource getSource() const override { return THEME_SOURCE_AUDIOBOOK; }
 
     void onEnter() override {
         const Session& session = Session::getInstance();
