@@ -1,14 +1,18 @@
 #ifndef __ADD_TO_PLAYLIST_H__
 #define __ADD_TO_PLAYLIST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <SDL2/SDL.h>
 
-// Open the add-to-playlist dialog for a single track
-void AddToPlaylist_open(const char* track_path, const char* display_name);
+// Open the add-to-playlist dialog for a single indexed file
+void AddToPlaylist_open(int file_id);
 
-// Open the add-to-playlist dialog for all audio files in a directory (recursive, max 1000)
-void AddToPlaylist_openDir(const char* dir_path);
+// Open the add-to-playlist dialog for all indexed audio files in a directory.
+void AddToPlaylist_openDir(int dir_id);
 
 // Check if the dialog is currently active
 bool AddToPlaylist_isActive(void);
@@ -20,9 +24,8 @@ int AddToPlaylist_handleInput(void);
 // Render the dialog overlay
 void AddToPlaylist_render(SDL_Surface* screen);
 
-// Toast accessors (for callers to show toast after dialog closes)
-const char* AddToPlaylist_getToastMessage(void);
-uint32_t AddToPlaylist_getToastTime(void);
-void AddToPlaylist_clearToast(void);
+#ifdef __cplusplus
+}
+#endif
 
 #endif

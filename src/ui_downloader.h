@@ -1,6 +1,10 @@
 #ifndef __UI_DOWNLOADER_H__
 #define __UI_DOWNLOADER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -8,7 +12,7 @@
 
 // Render downloader sub-menu
 void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                         char* toast_message, uint32_t toast_time);
+                         int menu_scroll);
 
 // Render downloader searching status
 void render_downloader_searching(SDL_Surface* screen, int show_setting, const char* search_query);
@@ -17,8 +21,7 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
 void render_downloader_results(SDL_Surface* screen, int show_setting,
                             const char* search_query,
                             DownloaderResult* results, int result_count,
-                            int selected, int* scroll,
-                            char* toast_message, uint32_t toast_time, bool searching);
+                            int selected, int* scroll, bool searching);
 
 // Render downloader download queue
 void render_downloader_queue(SDL_Surface* screen, int show_setting,
@@ -45,7 +48,11 @@ void downloader_queue_animate_scroll(void);
 // Clear downloader queue scroll state (call when queue items are removed)
 void downloader_queue_clear_scroll(void);
 
-// Clear downloader results scroll state and toast (call when leaving results screen)
+// Clear downloader results scroll state (call when leaving results screen)
 void downloader_results_clear_scroll(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

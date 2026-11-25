@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "podcast.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,9 +5,6 @@
 #include <strings.h>
 #include <time.h>
 #include <ctype.h>
-
-#include "defines.h"
-#include "api.h"
 
 // yxml parser
 #include "yxml.h"
@@ -253,7 +249,7 @@ int podcast_rss_parse_with_episodes(const char* xml_data, int xml_len, PodcastFe
                         state = RSS_STATE_CHANNEL_TITLE;
                     } else if (strcmp(elem, "description") == 0) {
                         state = RSS_STATE_CHANNEL_DESCRIPTION;
-                    } else if (strcmp(elem, "author") == 0) {
+                    } else if (strcmp(elem, "author") == 0 || strcmp(elem, "itunes:author") == 0) {
                         state = RSS_STATE_ITUNES_AUTHOR;
                     } else if (strcmp(elem, "image") == 0) {
                         state = RSS_STATE_CHANNEL_IMAGE;
@@ -401,4 +397,24 @@ int podcast_rss_parse_with_episodes(const char* xml_data, int xml_len, PodcastFe
 // Simple wrapper for backward compatibility (no episodes output)
 int podcast_rss_parse(const char* xml_data, int xml_len, PodcastFeed* feed) {
     return podcast_rss_parse_with_episodes(xml_data, xml_len, feed, NULL, 0, NULL);
+}
+
+const char* podcast_enclosure_extension(const char* url) {
+    static const char* const known[] = {"mp3", "m4a", "aac", "ogg", "opus", "wav", "flac"};
+
+    if (!url) return "mp3";
+
+    // The path ends where the query or the fragment begins
+    size_t end = strcspn(url, "?#");
+    size_t dot = end;
+    while (dot > 0 && url[dot - 1] != '.' && url[dot - 1] != '/') dot--;
+    if (dot == 0 || url[dot - 1] != '.') return "mp3";
+
+    size_t len = end - dot;
+    for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+        if (strlen(known[i]) == len && strncasecmp(url + dot, known[i], len) == 0) {
+            return known[i];
+        }
+    }
+    return "mp3";
 }

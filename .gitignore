@@ -1,13 +1,44 @@
-.DS_Store
+# Each file and directory whose name starts with a dot: the local configuration
+# of tools and editors, scratch directories, locks and build markers. The
+# exceptions below are part of the repository.
+.*
+!.gitignore
+!.gitkeep
+!/.github/
+!/.dev.example
 log.txt
 state/NextUI.code-workspace
-.vscode/
-.claude/
-.vscode/settings.json
 BUILD.md
 src/opus_obj/
 src/build/
+# Dependency checkouts created by ./dev prepare
+/NextUI/
+/NextUI-my355/
+# Build artifacts
 bin/tg5040/musicplayer.elf
 bin/tg5050/musicplayer.elf
+bin/my355/musicplayer.elf
+bin/h700/musicplayer.elf
+bin/desktop/musicplayer.elf
+# Libraries the build copies out of a toolchain image
+bin/*/*.so*
+test/bin/
 dist/
+__pycache__/
+# Downloaded on the device on first use, not shipped
+bin/yt-dlp
+bin/qjs
+bin/ffmpeg
+bin/*.new
+# Runtime state written by the app
+state/yt-dlp_version.txt
+state/youtube_queue.txt
+bin/wget
+# Zig and SQLite, fetched by ./dev deps fetch
+/deps/zig/
+/deps/sqlite/
+/deps/downloads/
+
+# Audit screenshots of the UI redesign, kept local
+docs/audit/
 .nextui-workspace

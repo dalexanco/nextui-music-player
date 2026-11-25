@@ -1,0 +1,84 @@
+#include "ui/view/options_panel_view.hpp"
+
+#include <algorithm>
+
+#include "ui/view/options_panel_layout.hpp"
+#include "ui_fonts.h"
+#include "ui_theme.h"
+
+// The NextUI headers declare C functions and have no guard of their own
+extern "C" {
+#include "defines.h"
+#include "api.h"
+}
+
+OptionsPanelView::OptionsPanelView() : titleView(Fonts_getLarge(), false), scopeView(Fonts_getTiny(), false) {
+    titleView.setText("Options");
+    titleView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+    scopeView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+    listView.setAdapter(adapter);
+}
+
+int OptionsPanelView::getRowCount() const { return static_cast<int>(adapter.rows.size()); }
+
+void OptionsPanelView::setScope(const std::string& scope) { scopeView.setText(scope); }
+
+void OptionsPanelView::setRows(const std::vector<OptionRow>& newRows) {
+    adapter.rows = newRows;
+    viewsStale   = true;
+    buildViews();
+}
+
+void OptionsPanelView::buildViews() {
+    const int selected = std::max(0, listView.getSelectedIndex());
+    viewsStale         = false;
+    adapter.views.clear();
+    adapter.optionViews.clear();
+    for (const OptionRow& row : adapter.rows) {
+        auto view = std::make_shared<OptionRowView>(row.label);
+        adapter.views.push_back(view);
+        adapter.optionViews.push_back(std::move(view));
+    }
+    frame.setBorderless(true);
+    listView.notifyDataChanged();
+    listView.setSelectedIndex(std::min(selected, std::max(0, getRowCount() - 1)));
+    refreshValues();
+}
+
+void OptionsPanelView::setValue(int index, const std::string& value) {
+    if (index < 0 || index >= getRowCount()) return;
+    adapter.rows[static_cast<size_t>(index)].value = value;
+}
+
+void OptionsPanelView::moveSelection(int direction) {
+    if (direction > 0) {
+        listView.moveForward();
+    } else {
+        listView.moveBackward();
+    }
+}
+
+void OptionsPanelView::refreshValues() {
+    for (size_t index = 0; index < adapter.rows.size(); index++) adapter.optionViews[index]->setValue(adapter.rows[index].value);
+}
+
+void OptionsPanelView::layout(UiLayoutContext& context) {
+    if (viewsStale) buildViews();
+    refreshValues();
+    const UiSize screen        = context.getMaxSize();
+    UiLayoutContext measuring  = context.createMeasuringContext();
+    const int padding          = SCALE1(PADDING);
+    const int headerHeight     = measuring.layoutChild(titleView, SDL_Rect{0, 0, screen.w, screen.h}).getSize().h + padding;
+    const int rowHeight        = SCALE1(PILL_SIZE) * 14 / 15;
+    const int bottomLimit      = screen.h - padding - SCALE1(PILL_SIZE) - padding;
+    const OptionsPanelRects rects = layoutOptionsPanel(screen.w, screen.h, padding, headerHeight, rowHeight, getRowCount(), bottomLimit);
+
+    context.layoutChild(frame, rects.panel);
+    const UiSize titleSize = measuring.layoutChild(titleView, rects.header).getSize();
+    const UiSize scopeSize = measuring.layoutChild(scopeView, rects.header).getSize();
+    context.layoutChild(titleView, SDL_Rect{rects.header.x, rects.header.y, titleSize.w, titleSize.h});
+    // The scope ends the row at the right, on the baseline of the title
+    context.layoutChild(scopeView, SDL_Rect{rects.header.x + rects.header.w - scopeSize.w,
+                                            rects.header.y + titleSize.h - scopeSize.h - SCALE1(4), scopeSize.w, scopeSize.h});
+    context.layoutChild(listView, rects.rows);
+}

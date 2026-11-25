@@ -1,228 +1,333 @@
 #include "settings.h"
-#include "defines.h"
+
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Settings file path (in shared userdata directory)
-#define SETTINGS_FILE SHARED_USERDATA_PATH "/music-player/settings.cfg"
-#define SETTINGS_DIR SHARED_USERDATA_PATH "/music-player"
+#include "defines.h"
+#include "api.h"
+#include "debug.h"
+#include "db.h"
 
-// Valid screen off timeout values (in seconds)
-// 0 means off (no auto screen off)
-static const int screen_off_values[] = {60, 90, 120, 0};
-#define SCREEN_OFF_VALUE_COUNT 4
-#define DEFAULT_SCREEN_OFF_INDEX 0  // Default to 60s
+#define SETTINGS_CACHE_CAPACITY 32
 
-// Bass filter (high-pass cutoff Hz, 0 = off)
-static const int bass_filter_values[] = {0, 80, 100, 120, 150, 200};
-#define BASS_FILTER_VALUE_COUNT 6
-#define DEFAULT_BASS_FILTER_INDEX 3  // 120 Hz
+const IntSetting SETTING_SCREEN_OFF_TIMEOUT = {
+    .name     = "screen_off_timeout",
+    .fallback = 60,
+};
 
-// Soft limiter (0=off, 1=mild, 2=medium, 3=strong)
-static const float soft_limiter_thresholds[] = {0.0f, 0.7f, 0.6f, 0.5f};
-#define SOFT_LIMITER_VALUE_COUNT 4
-#define DEFAULT_SOFT_LIMITER_INDEX 2  // Medium (0.6)
+const BoolSetting SETTING_LYRICS_ENABLED = {
+    .name     = "lyrics_enabled",
+    .fallback = true,
+};
 
-// Current settings
-static struct {
-    int screen_off_timeout;  // seconds, 0 = off
-    bool lyrics_enabled;     // true = show lyrics
-    int bass_filter_hz;      // 0=off, 80, 100, 120, 150, 200
-    int soft_limiter_index;  // 0=off, 1=mild, 2=medium, 3=strong
-} current_settings;
+const IntSetting SETTING_BASS_FILTER_HZ = {
+    .name     = "bass_filter_hz",
+    .fallback = 120,
+};
 
-// Find index of current screen off value in the values array
-static int get_screen_off_index(void) {
-    for (int i = 0; i < SCREEN_OFF_VALUE_COUNT; i++) {
-        if (screen_off_values[i] == current_settings.screen_off_timeout) {
-            return i;
-        }
+const IntSetting SETTING_SOFT_LIMITER = {
+    .name     = "soft_limiter",
+    .fallback = 2,
+};
+
+// In the order of UpdateChannel.
+static const char* const update_channel_db_values[] = {
+    "off",
+    "stable",
+    "beta",
+    NULL,
+};
+
+const EnumSetting SETTING_UPDATE_CHANNEL = {
+    .name      = "update_channel",
+    .fallback  = UPDATE_CHANNEL_STABLE,
+    .db_values = update_channel_db_values,
+};
+
+typedef struct {
+    const char*   name;
+    DbSettingType type;
+    int           int_value;
+    bool          bool_value;
+    char*         string_value;
+} SettingCacheEntry;
+
+static SettingCacheEntry cache[SETTINGS_CACHE_CAPACITY];
+static int cache_count;
+static pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int find_entry(const char* name) {
+    for (int index = 0; index < cache_count; index++) {
+        if (strcmp(cache[index].name, name) == 0) return index;
     }
-    return DEFAULT_SCREEN_OFF_INDEX;
+    return -1;
 }
 
-// Find index of current bass filter value
-static int get_bass_filter_index(void) {
-    for (int i = 0; i < BASS_FILTER_VALUE_COUNT; i++) {
-        if (bass_filter_values[i] == current_settings.bass_filter_hz) {
-            return i;
+static bool save_entry(const SettingCacheEntry* source) {
+    int index = find_entry(source->name);
+    bool new_entry = index < 0;
+    if (new_entry && cache_count >= SETTINGS_CACHE_CAPACITY) {
+        LOG_error("[Settings] cache is full for %s\n", source->name);
+        return false;
+    }
+
+    char* name = NULL;
+    if (new_entry) {
+        name = strdup(source->name);
+        if (!name) {
+            LOG_error("[Settings] failed to copy key %s\n", source->name);
+            return false;
         }
     }
-    return DEFAULT_BASS_FILTER_INDEX;
+
+    char* string_value = NULL;
+    if (source->type == DB_SETTING_STRING) {
+        string_value = strdup(source->string_value ? source->string_value : "");
+        if (!string_value) {
+            free(name);
+            LOG_error("[Settings] failed to copy value for %s\n", source->name);
+            return false;
+        }
+    }
+
+    if (new_entry) {
+        index = cache_count++;
+        cache[index] = (SettingCacheEntry){
+            .name = name,
+        };
+    }
+
+    SettingCacheEntry* entry = &cache[index];
+    entry->type = source->type;
+    entry->int_value = source->int_value;
+    entry->bool_value = source->bool_value;
+    free(entry->string_value);
+    entry->string_value = string_value;
+    return true;
+}
+
+static void clear_cache(void) {
+    for (int index = 0; index < cache_count; index++) {
+        free((void*)cache[index].name);
+        free(cache[index].string_value);
+    }
+    memset(cache, 0, sizeof(cache));
+    cache_count = 0;
+}
+
+static int get_int(const IntSetting* key) {
+    int index = find_entry(key->name);
+    return index >= 0 && cache[index].type == DB_SETTING_INT
+               ? cache[index].int_value
+               : key->fallback;
+}
+
+static bool get_bool(const BoolSetting* key) {
+    int index = find_entry(key->name);
+    return index >= 0 && cache[index].type == DB_SETTING_BOOL
+               ? cache[index].bool_value
+               : key->fallback;
+}
+
+static const char* get_string(const StringSetting* key) {
+    int index = key->name ? find_entry(key->name) : -1;
+    return index >= 0 && cache[index].type == DB_SETTING_STRING
+               ? cache[index].string_value
+               : key->fallback;
+}
+
+static bool set_int(const char* name, int value) {
+    int index = find_entry(name);
+    if (index >= 0 && cache[index].type == DB_SETTING_INT &&
+        cache[index].int_value == value) {
+        return false;
+    }
+
+    SettingCacheEntry entry = {
+        .name      = name,
+        .type      = DB_SETTING_INT,
+        .int_value = value,
+    };
+    return save_entry(&entry);
+}
+
+static bool set_bool(const char* name, bool value) {
+    int index = find_entry(name);
+    if (index >= 0 && cache[index].type == DB_SETTING_BOOL &&
+        cache[index].bool_value == value) {
+        return false;
+    }
+
+    SettingCacheEntry entry = {
+        .name       = name,
+        .type       = DB_SETTING_BOOL,
+        .bool_value = value,
+    };
+    return save_entry(&entry);
+}
+
+static bool set_string(const char* name, const char* value) {
+    int index = find_entry(name);
+    if (index >= 0 && cache[index].type == DB_SETTING_STRING &&
+        cache[index].string_value && strcmp(cache[index].string_value, value) == 0) {
+        return false;
+    }
+
+    SettingCacheEntry entry = {
+        .name         = name,
+        .type         = DB_SETTING_STRING,
+        .string_value = (char*)value,
+    };
+    return save_entry(&entry);
 }
 
 void Settings_init(void) {
-    // Set defaults
-    current_settings.screen_off_timeout = screen_off_values[DEFAULT_SCREEN_OFF_INDEX];
-    current_settings.lyrics_enabled = true;
-    current_settings.bass_filter_hz = bass_filter_values[DEFAULT_BASS_FILTER_INDEX];
-    current_settings.soft_limiter_index = DEFAULT_SOFT_LIMITER_INDEX;
+    pthread_mutex_lock(&cache_mutex);
+    clear_cache();
+    pthread_mutex_unlock(&cache_mutex);
 
-    // Try to load from file
-    FILE* f = fopen(SETTINGS_FILE, "r");
-    if (!f) return;
+    DbSettingsResult* result = Db_readSettings();
+    if (!result) return;
 
-    char line[256];
-    while (fgets(line, sizeof(line), f)) {
-        int value;
-        if (sscanf(line, "screen_off_timeout=%d", &value) == 1) {
-            // Validate the value
-            for (int i = 0; i < SCREEN_OFF_VALUE_COUNT; i++) {
-                if (screen_off_values[i] == value) {
-                    current_settings.screen_off_timeout = value;
-                    break;
-                }
-            }
-        }
-        if (sscanf(line, "lyrics_enabled=%d", &value) == 1) {
-            current_settings.lyrics_enabled = (value != 0);
-        }
-        if (sscanf(line, "bass_filter_hz=%d", &value) == 1) {
-            for (int i = 0; i < BASS_FILTER_VALUE_COUNT; i++) {
-                if (bass_filter_values[i] == value) {
-                    current_settings.bass_filter_hz = value;
-                    break;
-                }
-            }
-        }
-        if (sscanf(line, "soft_limiter=%d", &value) == 1) {
-            if (value >= 0 && value < SOFT_LIMITER_VALUE_COUNT) {
-                current_settings.soft_limiter_index = value;
-            }
-        }
+    pthread_mutex_lock(&cache_mutex);
+    for (int index = 0; index < result->count; index++) {
+        const DbSetting* setting = &result->items[index];
+        SettingCacheEntry entry = {
+            .name         = setting->name,
+            .type         = setting->type,
+            .int_value    = setting->int_value,
+            .bool_value   = setting->bool_value,
+            .string_value = setting->string_value,
+        };
+        save_entry(&entry);
     }
-    fclose(f);
+    pthread_mutex_unlock(&cache_mutex);
+
+    Db_freeResult(result);
 }
 
 void Settings_quit(void) {
-    Settings_save();
+    pthread_mutex_lock(&cache_mutex);
+    clear_cache();
+    pthread_mutex_unlock(&cache_mutex);
 }
 
-int Settings_getScreenOffTimeout(void) {
-    return current_settings.screen_off_timeout;
+int Settings_getInt(const IntSetting* key) {
+    if (!key || !key->name) return 0;
+
+    pthread_mutex_lock(&cache_mutex);
+    int value = get_int(key);
+    pthread_mutex_unlock(&cache_mutex);
+    return value;
 }
 
-void Settings_setScreenOffTimeout(int seconds) {
-    // Validate the value
-    for (int i = 0; i < SCREEN_OFF_VALUE_COUNT; i++) {
-        if (screen_off_values[i] == seconds) {
-            current_settings.screen_off_timeout = seconds;
-            Settings_save();
-            return;
-        }
+void Settings_setInt(const IntSetting* key, int value) {
+    if (!key || !key->name) return;
+
+    pthread_mutex_lock(&cache_mutex);
+    bool updated = set_int(key->name, value);
+    pthread_mutex_unlock(&cache_mutex);
+
+    if (updated) Db_saveIntSetting(key->name, value);
+}
+
+bool Settings_getBool(const BoolSetting* key) {
+    if (!key || !key->name) return false;
+
+    pthread_mutex_lock(&cache_mutex);
+    bool value = get_bool(key);
+    pthread_mutex_unlock(&cache_mutex);
+    return value;
+}
+
+void Settings_setBool(const BoolSetting* key, bool value) {
+    if (!key || !key->name) return;
+
+    pthread_mutex_lock(&cache_mutex);
+    bool updated = set_bool(key->name, value);
+    pthread_mutex_unlock(&cache_mutex);
+
+    if (updated) Db_saveBoolSetting(key->name, value);
+}
+
+bool Settings_toggleBool(const BoolSetting* key) {
+    if (!key || !key->name) return false;
+
+    pthread_mutex_lock(&cache_mutex);
+    bool current = get_bool(key);
+    bool value = !current;
+    bool updated = set_bool(key->name, value);
+    pthread_mutex_unlock(&cache_mutex);
+
+    if (updated) Db_saveBoolSetting(key->name, value);
+    return value;
+}
+
+char* Settings_getString(const StringSetting* key) {
+    if (!key) return NULL;
+
+    pthread_mutex_lock(&cache_mutex);
+    const char* value = get_string(key);
+    pthread_mutex_unlock(&cache_mutex);
+    return strdup(value ? value : "");
+}
+
+int Settings_getStringInto(const StringSetting* key, char* buf, size_t size) {
+    if (!key || (!buf && size > 0)) return -1;
+
+    pthread_mutex_lock(&cache_mutex);
+    const char* value = get_string(key);
+    int required = snprintf(buf, size, "%s", value ? value : "");
+    pthread_mutex_unlock(&cache_mutex);
+    return required;
+}
+
+void Settings_setString(const StringSetting* key, const char* value) {
+    if (!key || !key->name || !value) return;
+
+    pthread_mutex_lock(&cache_mutex);
+    bool updated = set_string(key->name, value);
+    pthread_mutex_unlock(&cache_mutex);
+
+    if (updated) Db_saveStringSetting(key->name, value);
+}
+
+static int enum_count(const EnumSetting* key) {
+    int count = 0;
+    while (key->db_values[count]) count++;
+    return count;
+}
+
+static int get_enum(const EnumSetting* key) {
+    int index = find_entry(key->name);
+    if (index < 0 || cache[index].type != DB_SETTING_STRING || !cache[index].string_value) {
+        return key->fallback;
     }
-    // Invalid value, ignore
-}
-
-void Settings_cycleScreenOffNext(void) {
-    int index = get_screen_off_index();
-    index = (index + 1) % SCREEN_OFF_VALUE_COUNT;
-    current_settings.screen_off_timeout = screen_off_values[index];
-    Settings_save();
-}
-
-void Settings_cycleScreenOffPrev(void) {
-    int index = get_screen_off_index();
-    index = (index - 1 + SCREEN_OFF_VALUE_COUNT) % SCREEN_OFF_VALUE_COUNT;
-    current_settings.screen_off_timeout = screen_off_values[index];
-    Settings_save();
-}
-
-const char* Settings_getScreenOffDisplayStr(void) {
-    switch (current_settings.screen_off_timeout) {
-        case 60:  return "60s";
-        case 90:  return "90s";
-        case 120: return "120s";
-        case 0:   return "Off";
-        default:  return "60s";
+    for (int value = 0; key->db_values[value]; value++) {
+        if (strcmp(key->db_values[value], cache[index].string_value) == 0) return value;
     }
+    return key->fallback;
 }
 
-void Settings_save(void) {
-    // Ensure directory exists
-    char mkdir_cmd[512];
-    snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", SETTINGS_DIR);
-    system(mkdir_cmd);
+int Settings_getEnum(const EnumSetting* key) {
+    if (!key || !key->name || !key->db_values) return 0;
 
-    FILE* f = fopen(SETTINGS_FILE, "w");
-    if (!f) return;
-
-    fprintf(f, "screen_off_timeout=%d\n", current_settings.screen_off_timeout);
-    fprintf(f, "lyrics_enabled=%d\n", current_settings.lyrics_enabled ? 1 : 0);
-    fprintf(f, "bass_filter_hz=%d\n", current_settings.bass_filter_hz);
-    fprintf(f, "soft_limiter=%d\n", current_settings.soft_limiter_index);
-    fclose(f);
+    pthread_mutex_lock(&cache_mutex);
+    int value = get_enum(key);
+    pthread_mutex_unlock(&cache_mutex);
+    return value;
 }
 
-bool Settings_getLyricsEnabled(void) {
-    return current_settings.lyrics_enabled;
-}
+void Settings_setEnum(const EnumSetting* key, int value) {
+    if (!key || !key->name || !key->db_values) return;
+    if (value < 0 || value >= enum_count(key)) return;
 
-void Settings_setLyricsEnabled(bool enabled) {
-    current_settings.lyrics_enabled = enabled;
-    Settings_save();
-}
+    const char* spelling = key->db_values[value];
+    pthread_mutex_lock(&cache_mutex);
+    bool updated = set_string(key->name, spelling);
+    pthread_mutex_unlock(&cache_mutex);
 
-void Settings_toggleLyrics(void) {
-    current_settings.lyrics_enabled = !current_settings.lyrics_enabled;
-    Settings_save();
-}
-
-// Bass filter getters/cyclers
-int Settings_getBassFilterHz(void) {
-    return current_settings.bass_filter_hz;
-}
-
-void Settings_cycleBassFilterNext(void) {
-    int index = get_bass_filter_index();
-    index = (index + 1) % BASS_FILTER_VALUE_COUNT;
-    current_settings.bass_filter_hz = bass_filter_values[index];
-    Settings_save();
-}
-
-void Settings_cycleBassFilterPrev(void) {
-    int index = get_bass_filter_index();
-    index = (index - 1 + BASS_FILTER_VALUE_COUNT) % BASS_FILTER_VALUE_COUNT;
-    current_settings.bass_filter_hz = bass_filter_values[index];
-    Settings_save();
-}
-
-const char* Settings_getBassFilterDisplayStr(void) {
-    static char buf[16];
-    if (current_settings.bass_filter_hz == 0) return "Off";
-    snprintf(buf, sizeof(buf), "%d Hz", current_settings.bass_filter_hz);
-    return buf;
-}
-
-// Soft limiter getters/cyclers
-int Settings_getSoftLimiter(void) {
-    return current_settings.soft_limiter_index;
-}
-
-float Settings_getSoftLimiterThreshold(void) {
-    if (current_settings.soft_limiter_index >= 0 && current_settings.soft_limiter_index < SOFT_LIMITER_VALUE_COUNT) {
-        return soft_limiter_thresholds[current_settings.soft_limiter_index];
-    }
-    return soft_limiter_thresholds[DEFAULT_SOFT_LIMITER_INDEX];
-}
-
-void Settings_cycleSoftLimiterNext(void) {
-    current_settings.soft_limiter_index = (current_settings.soft_limiter_index + 1) % SOFT_LIMITER_VALUE_COUNT;
-    Settings_save();
-}
-
-void Settings_cycleSoftLimiterPrev(void) {
-    current_settings.soft_limiter_index = (current_settings.soft_limiter_index - 1 + SOFT_LIMITER_VALUE_COUNT) % SOFT_LIMITER_VALUE_COUNT;
-    Settings_save();
-}
-
-const char* Settings_getSoftLimiterDisplayStr(void) {
-    switch (current_settings.soft_limiter_index) {
-        case 0:  return "Off";
-        case 1:  return "Mild";
-        case 2:  return "Medium";
-        case 3:  return "Strong";
-        default: return "Medium";
-    }
+    if (updated) Db_saveStringSetting(key->name, spelling);
 }

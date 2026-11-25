@@ -1,0 +1,198 @@
+#ifndef __INPUT_INPUT_EVENTS_HPP__
+#define __INPUT_INPUT_EVENTS_HPP__
+
+#include <cstdint>
+#include <variant>
+
+namespace input {
+
+// A button of the pad. Each value is the bit index of the button in the pad masks.
+enum class Button : uint8_t {
+    DpadUp,
+    DpadDown,
+    DpadLeft,
+    DpadRight,
+    A,
+    B,
+    X,
+    Y,
+    Start,
+    Select,
+    L1,
+    R1,
+    L2,
+    R2,
+    L3,
+    R3,
+    L4,
+    R4,
+    Menu,
+    Plus,
+    Minus,
+    Power,
+    PowerOff,
+    AnalogUp,
+    AnalogDown,
+    AnalogLeft,
+    AnalogRight,
+    Home,
+};
+
+inline constexpr int kButtonCount = static_cast<int>(Button::Home) + 1;
+
+inline constexpr uint32_t getButtonBit(Button button) {
+    return 1u << static_cast<int>(button);
+}
+
+// A button of USB earphones.
+enum class MediaKey : uint8_t {
+    PlayPause,
+    Next,
+    Previous,
+    VolumeUp,
+    VolumeDown,
+};
+
+// The raw events: each change of an input source, with no filter.
+namespace event {
+struct ButtonPressed {
+    Button button;
+};
+
+struct ButtonReleased {
+    Button button;
+};
+
+// Another listener consumed an event of the gesture. The button is released for this listener,
+// with no released event.
+struct ButtonCancel {
+    Button button;
+};
+
+// Each held button is released, with no released event. The gesture ends.
+struct ButtonReset {};
+
+struct Media {
+    MediaKey key;
+};
+}  // namespace event
+
+struct RawEvent {
+    uint32_t time;
+    std::variant<event::ButtonPressed, event::ButtonReleased, event::ButtonReset,
+                 event::ButtonCancel, event::Media>
+        kind;
+};
+
+/** Returns: true for a raw event of a button of the pad, false for a media key */
+inline bool isButtonEvent(const RawEvent& event) {
+    return std::get_if<event::Media>(&event.kind) == nullptr;
+}
+
+/** Returns: true for the press of a button of the pad */
+inline bool isButtonPressedEvent(const RawEvent& event) {
+    return std::get_if<event::ButtonPressed>(&event.kind) != nullptr;
+}
+
+// The button events: what the input means.
+namespace event {
+struct ShortPress {
+    Button button;
+};
+
+struct LongPress {
+    Button button;
+};
+
+struct Repeat {
+    Button button;
+};
+
+// The members in the order of the request. The first member was pressed first, or both
+// were pressed in one frame.
+struct Combo {
+    Button first;
+    Button second;
+};
+}  // namespace event
+
+struct ButtonEvent {
+    uint32_t time;
+    std::variant<event::ShortPress, event::LongPress, event::Repeat, event::Combo> kind;
+
+    /** Returns: true for a short press, a long press or a repeat of button, false for a combo */
+    bool isSingleButton(Button button) const {
+        if (const auto* typedEvent = std::get_if<event::ShortPress>(&kind)) return typedEvent->button == button;
+        if (const auto* typedEvent = std::get_if<event::LongPress>(&kind)) return typedEvent->button == button;
+        if (const auto* typedEvent = std::get_if<event::Repeat>(&kind)) return typedEvent->button == button;
+        return false;
+    }
+};
+
+// What a listener asks the detector for. The short press is always on.
+namespace request {
+struct LongPress {
+    Button button;
+};
+
+struct Repeat {
+    Button button;
+};
+
+// The first member is held, and then the second member is pressed.
+struct Combo {
+    Button first;
+    Button second;
+};
+}  // namespace request
+
+using ButtonRequest = std::variant<request::LongPress, request::Repeat, request::Combo>;
+
+inline constexpr const char* getButtonName(Button button) {
+    switch (button) {
+        case Button::DpadUp:      return "UP";
+        case Button::DpadDown:    return "DOWN";
+        case Button::DpadLeft:    return "LEFT";
+        case Button::DpadRight:   return "RIGHT";
+        case Button::A:           return "A";
+        case Button::B:           return "B";
+        case Button::X:           return "X";
+        case Button::Y:           return "Y";
+        case Button::Start:       return "START";
+        case Button::Select:      return "SELECT";
+        case Button::L1:          return "L1";
+        case Button::R1:          return "R1";
+        case Button::L2:          return "L2";
+        case Button::R2:          return "R2";
+        case Button::L3:          return "L3";
+        case Button::R3:          return "R3";
+        case Button::L4:          return "L4";
+        case Button::R4:          return "R4";
+        case Button::Menu:        return "MENU";
+        case Button::Plus:        return "PLUS";
+        case Button::Minus:       return "MINUS";
+        case Button::Power:       return "POWER";
+        case Button::PowerOff:    return "POWEROFF";
+        case Button::AnalogUp:    return "STICK UP";
+        case Button::AnalogDown:  return "STICK DOWN";
+        case Button::AnalogLeft:  return "STICK LEFT";
+        case Button::AnalogRight: return "STICK RIGHT";
+        case Button::Home:        return "HOME";
+    }
+    return "?";
+}
+
+inline constexpr const char* getMediaKeyName(MediaKey key) {
+    switch (key) {
+        case MediaKey::PlayPause:  return "PLAY/PAUSE";
+        case MediaKey::Next:       return "NEXT";
+        case MediaKey::Previous:   return "PREVIOUS";
+        case MediaKey::VolumeUp:   return "VOLUME UP";
+        case MediaKey::VolumeDown: return "VOLUME DOWN";
+    }
+    return "?";
+}
+
+}  // namespace input
+
+#endif

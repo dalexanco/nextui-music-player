@@ -1,6 +1,10 @@
 #ifndef __PLAYLIST_H__
 #define __PLAYLIST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include "player.h"  // For AudioFormat
 
@@ -9,6 +13,7 @@
 
 // Single track in the playlist
 typedef struct {
+    int file_id;
     char path[512];
     char name[256];
     AudioFormat format;
@@ -30,11 +35,19 @@ void Playlist_free(PlaylistContext* ctx);
 // Clear playlist (reset count but keep memory)
 void Playlist_clear(PlaylistContext* ctx);
 
-// Build playlist from a directory recursively
-// - path: directory to scan
-// - start_track_path: path of the track to start from (will be at index 0)
+// Build a playlist from an indexed directory and its descendants.
+// - start_file_id: file to place at index 0, or 0 for the first file
 // Returns: number of tracks added, or -1 on error
-int Playlist_buildFromDirectory(PlaylistContext* ctx, const char* path, const char* start_track_path);
+int Playlist_buildFromDirectory(PlaylistContext* ctx, int dir_id, int start_file_id);
+
+// Build a playlist of the one indexed file `file_id`.
+// Returns: 1, or -1 on error
+int Playlist_buildFromFile(PlaylistContext* ctx, int file_id);
+
+// Collect at most max_tracks playable files of an indexed directory and its
+// descendants into a new array. The caller frees *tracks.
+// Returns: number of tracks, or -1 on error
+int Playlist_collectDirectory(int dir_id, int max_tracks, PlaylistTrack** tracks);
 
 // Navigation (no wrap-around)
 // Returns: new index, or -1 if at end/start
@@ -44,6 +57,24 @@ int Playlist_prev(PlaylistContext* ctx);
 // Shuffle - pick a random track
 // Returns: new index, or -1 if empty
 int Playlist_shuffle(PlaylistContext* ctx);
+
+// How the queue selects the track after the current one
+typedef enum {
+    PLAYLIST_STEP_NEXT,     // the next track of the queue, or none after the last one
+    PLAYLIST_STEP_SHUFFLE,  // a random track
+    PLAYLIST_STEP_REPEAT,   // the current track again
+} PlaylistStep;
+
+// Starts the playback of `track`.
+// Returns: true when the track plays
+typedef bool (*PlaylistStartFn)(const PlaylistTrack* track, void* user);
+
+// Starts the track at `index`. When a track does not start, selects the next one with `step`
+// and starts it, and tries each track at most once. Pass -1 in `index` to select the first
+// track with `step` from the current track. Sets the current index to the track that plays.
+// Returns: the index of the track that plays, or -1 when no track starts
+int Playlist_startWithRecovery(PlaylistContext* ctx, int index, PlaylistStep step,
+                               PlaylistStartFn start, void* user);
 
 // Set current track by index
 // Returns: 0 on success, -1 if invalid index
@@ -58,10 +89,8 @@ int Playlist_getCurrentIndex(const PlaylistContext* ctx);
 // Check if playlist is valid/active
 bool Playlist_isActive(const PlaylistContext* ctx);
 
-// Collect audio file paths from a directory recursively (up to max_count).
-// Returns the count; *out_paths is a malloc'd array of strdup'd path strings.
-// Caller must free with Playlist_freePaths(paths, count).
-int Playlist_collectPaths(const char* dir_path, char*** out_paths, int max_count);
-void Playlist_freePaths(char** paths, int count);
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __PLAYLIST_H__

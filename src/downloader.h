@@ -1,6 +1,10 @@
 #ifndef __DOWNLOADER_H__
 #define __DOWNLOADER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -36,18 +40,8 @@ typedef struct {
     int eta_sec;           // Estimated time remaining in seconds
 } DownloaderQueueItem;
 
-// Module states
-typedef enum {
-    DOWNLOADER_STATE_IDLE = 0,
-    DOWNLOADER_STATE_SEARCHING,
-    DOWNLOADER_STATE_DOWNLOADING,
-    DOWNLOADER_STATE_UPDATING,
-    DOWNLOADER_STATE_ERROR
-} DownloaderState;
-
 // Download status info
 typedef struct {
-    DownloaderState state;
     int current_index;           // Currently downloading item index
     int total_items;             // Total items in queue
     int completed_count;         // Number completed
@@ -58,9 +52,26 @@ typedef struct {
     int eta_sec;                 // Current ETA
 } DownloaderDownloadStatus;
 
+// What the helpers screen is showing, and therefore what A does there. Derived
+// from one snapshot so the text and the button hint cannot disagree.
+typedef enum {
+    YTDLP_UI_UNCHECKED,   // no check has run yet
+    YTDLP_UI_CHECKING,
+    YTDLP_UI_AVAILABLE,   // something to install or update
+    YTDLP_UI_CURRENT,     // everything present and current
+    YTDLP_UI_INSTALLING,
+    YTDLP_UI_INSTALLED,
+    YTDLP_UI_FAILED
+} YtdlpUiState;
+
 // Update status info
 typedef struct {
-    bool update_available;
+    bool update_available;      // the check found something to fetch
+    bool fresh_install;         // a helper is absent, so this installs rather than updates
+    bool checking;              // a version check is in flight
+    bool check_complete;        // a check has come back
+    long estimated_bytes;       // what confirming would download
+    char plan_summary[64];      // what it would install, e.g. "yt-dlp, ffmpeg"
     char current_version[32];
     char latest_version[32];
     bool updating;
@@ -68,6 +79,9 @@ typedef struct {
     long download_bytes;        // Bytes downloaded so far
     long download_total;        // Total bytes to download (0 if unknown)
     char status_detail[64];     // Detailed status (e.g., "2.5 MB / 5.0 MB")
+    char step_message[64];      // Current step (e.g., "Downloading media tools")
+    int step_index;             // 1-based position of the current step
+    int step_count;             // Total steps this run
     char error_message[256];
 } DownloaderUpdateStatus;
 
@@ -79,9 +93,23 @@ typedef struct {
     char error_message[256];    // Error message if failed
 } DownloaderSearchStatus;
 
+// Reported version when the yt-dlp binary is not installed
+#define DOWNLOADER_VERSION_NOT_INSTALLED "Not installed"
+
 // Initialize downloader module
-// Returns 0 on success, -1 if yt-dlp not found
+// Safe to call repeatedly: paths and the queue are set up on the first call,
+// so a later install can finish initialization without an app restart.
+// Returns 0 on success, -1 if yt-dlp is not installed
 int Downloader_init(void);
+
+// Scans the download directory in the file index and waits for the scan. Call it before a
+// search, thus the search results know which titles are already downloaded. Blocks, thus do
+// not call it at app start. Returns false when the directory is not indexed.
+bool Downloader_refreshIndex(void);
+
+// Re-read the yt-dlp version, probing the binary when the cached value is
+// missing or stale. Reports DOWNLOADER_VERSION_NOT_INSTALLED when absent.
+void Downloader_refreshVersion(void);
 
 // Cleanup resources
 void Downloader_cleanup(void);
@@ -101,7 +129,7 @@ const char* Downloader_getVersion(void);
 int Downloader_startSearch(const char* query);
 
 // Get search status (call in main loop to check progress)
-const DownloaderSearchStatus* Downloader_getSearchStatus(void);
+DownloaderSearchStatus Downloader_getSearchStatus(void);
 
 // Get search results after search completes
 // Returns pointer to internal results array, count is set via status->result_count
@@ -118,9 +146,9 @@ int Downloader_queueClear(void);
 int Downloader_queueCount(void);
 DownloaderQueueItem* Downloader_queueGet(int* count);
 
-// Check if video is already in queue or downloaded
+// Check if a title is already in the download directory.
 bool Downloader_isInQueue(const char* video_id);
-bool Downloader_isDownloaded(const char* video_id);
+bool Downloader_isDownloaded(const char* title);
 
 // Start downloading queue items (runs in background)
 int Downloader_downloadStart(void);
@@ -129,19 +157,30 @@ int Downloader_downloadStart(void);
 void Downloader_downloadStop(void);
 
 // Get download status
-const DownloaderDownloadStatus* Downloader_getDownloadStatus(void);
+DownloaderDownloadStatus Downloader_getDownloadStatus(void);
 
 // Check if download thread is running
 bool Downloader_isDownloading(void);
 
-// yt-dlp update functions
-int Downloader_checkForUpdate(void);  // Check if new version available
-int Downloader_startUpdate(void);     // Start updating yt-dlp
-void Downloader_cancelUpdate(void);   // Cancel update
-const DownloaderUpdateStatus* Downloader_getUpdateStatus(void);
+// Start the update check (without installing) in background.
+// Use Downloader_getUpdateStatus() to monitor the results.
+int Downloader_startUpdateCheck(void);
 
-// Get current state
-DownloaderState Downloader_getState(void);
+// Start the update (download+install) in background.
+// Use Downloader_getUpdateStatus() to monitor the results.
+int Downloader_startUpdate(void);
+
+// Cancel background processes (check or update)
+void Downloader_cancelUpdate(void);
+
+// A by-value copy of the update status. The check and the install run on worker
+// threads and can flip fields part-way through a frame, so anything reading more
+// than one field must take a copy once and use that.
+DownloaderUpdateStatus Downloader_getUpdateStatus(void);
+
+// Boil the update status down to what a screen needs to show and offer.
+YtdlpUiState Downloader_updateUiState(const DownloaderUpdateStatus* status);
+
 
 // Get last error message
 const char* Downloader_getError(void);
@@ -156,8 +195,8 @@ void Downloader_loadQueue(void);
 // Get download directory path
 const char* Downloader_getDownloadPath(void);
 
-// Open keyboard for search input
-// Returns allocated string that caller must free, or NULL if cancelled
-char* Downloader_openKeyboard(const char* prompt);
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,18 +1,44 @@
 #ifndef __UI_UTILS_H__
 #define __UI_UTILS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include "defines.h"  // Brings in SDL2 via platform.h -> sdl.h
 #include "api.h"      // For SDL types and TTF
 #include "player.h"   // For AudioFormat
+#include "ui_theme.h"
+#include "screen_title.h"
+#include "stopwatch.h"
 
-// Format duration as MM:SS
+// The speed of each scrolling text, in scaled pixels a second. Apply SCALE1().
+#define SCROLLING_SPEED_SP 40
+
+// The gap between the end of a scrolling text and its next copy, in scaled pixels. Apply SCALE1().
+#define SCROLL_GAP_SP 30
+
+// The time that a text that does not fit stays at rest before it scrolls, in milliseconds.
+#define SCROLL_START_DELAY 1000
+
+// Format a time as MM:SS, or as H:MM:SS from one hour
 void format_time(char* buf, int ms);
+
+// Copy in_name to out_name, truncated so that its width with padding is no more
+// than max_width. A truncated text ends in "...".
+//
+// Requirement: out_name is at least the size of in_name.
+// Returns: the width in pixels of out_name, with padding
+// Note: this replaces GFX_truncateText() of NextUI, which can cut a UTF-8
+// character. Remove it when the pinned NextUI has
+// https://github.com/LoveRetro/NextUI/pull/876.
+int UI_truncateText(TTF_Font* font, const char* in_name, char* out_name, int max_width,
+                    int padding);
 
 // Get format name string
 const char* get_format_name(AudioFormat format);
-
 // Scrolling text state for marquee animation
 typedef struct {
     char text[512];         // Text to display
@@ -20,48 +46,125 @@ typedef struct {
     int max_width;          // Maximum display width
     uint32_t start_time;    // Animation start time
     bool needs_scroll;      // True if text is wider than max_width
-    int scroll_offset;      // Current pixel offset for smooth scrolling
-    bool use_gpu_scroll;    // True = use GPU layer (for lists), False = software (for player)
+    StopwatchData scroll_time;  // The time where the marquee moved
+    bool use_gpu_scroll;    // True where the marquee goes on the animation layer
     int last_x, last_y;     // Last render position (for animate-only mode)
     TTF_Font* last_font;    // Last font used (for animate-only mode)
     SDL_Color last_color;   // Last color used (for animate-only mode)
+    ThemeRole role;         // Role of the cached text
+    bool selected;          // True where the text sits on a selection pill
     SDL_Surface* cached_scroll_surface;  // Cached surface for GPU scroll (no bg)
-    bool scroll_active;     // True once GPU scroll has actually started (after delay)
 } ScrollTextState;
 
-// Reset scroll state for new text
-// use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
-void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font, int max_width, bool use_gpu);
+// Reset scroll state for new text. Pass true in `use_gpu` to build the cached
+// marquee for the animation layer; with false a text wider than its space stays
+// at rest.
+void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
+                      int max_width, ThemeRole role, bool selected, bool use_gpu);
+
+// Forgets the text and frees the cached marquee. Call on the way out of a
+// screen, thus the next text starts from rest and no surface leaks.
+void ScrollText_forget(ScrollTextState* state);
 
 // Check if scrolling is active (text needs to scroll)
 bool ScrollText_isScrolling(ScrollTextState* state);
 
-// Check if scroll needs a render to transition from delay to active
+// True where the delay of a text that is too wide has ended and the marquee
+// waits for one render to start.
 bool ScrollText_needsRender(ScrollTextState* state);
 
 // Activate scrolling after delay (for player screens that bypass ScrollText_render)
 void ScrollText_activateAfterDelay(ScrollTextState* state);
 
+// Pass true in `paused` to stop the marquee, and false to continue it. Call on
+// each frame, also a frame that paints nothing, thus a pause does not count as
+// movement.
+void ScrollText_setPaused(ScrollTextState* state, bool paused);
+
 // Update scroll animation only (for GPU mode, doesn't redraw screen)
 // Call this when dirty=0 but scrolling is active - uses saved position from last render
 void ScrollText_animateOnly(ScrollTextState* state);
 
-// Render scrolling text (call every frame)
+// Draws the text of a row: at rest on the surface where it fits or waits, and
+// as a marquee on the animation layer where it moves. Call every frame that
+// renders the row.
 void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
                        SDL_Surface* screen, int x, int y);
 
 // Unified update: checks for text change, resets if needed, and renders
-// use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
 void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
-                       int max_width, SDL_Color color, SDL_Surface* screen, int x, int y, bool use_gpu);
+                       int max_width, ThemeRole role, bool selected, SDL_Surface* screen,
+                       int x, int y, bool use_gpu);
 
-// GPU scroll without background (for player title)
-// Uses PLAT_drawOnLayer to render to GPU layer without pill background
-void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
-                                SDL_Color color, int x, int y);
+// Draws the marquee of a playing title at its offset on the animation layer.
+// Does not clear the layer: the painter of
+// the layer of the screen owns the clear and the z order.
+void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
+                         SDL_Color color, int x, int y);
 
-// Render standard screen header (title pill + hardware status)
-void render_screen_header(SDL_Surface* screen, const char* title, int show_setting);
+// The y of the top of the chip of a playing screen. The chip shares the line of the
+// status group, thus it takes the top margin where the platform draws none. It then
+// keeps the same gap to the top edge as to the left edge.
+int top_of_the_chip_box(SDL_Surface* screen, int chip_h);
+
+// The height of the header of a screen (the top pill row) including all
+// applicable paddings. This is the top boundary content may use.
+// If status group is not displayed, the height could be defined by `chip_h`.
+int total_header_height(SDL_Surface* screen, int chip_h);
+
+
+// The total height of the bottom chip footer of a screen including
+// all applicable paddings, used when pills are not used (e.g. playing screen).
+int chip_footer_height(int row_h);
+
+// The y of the top of a box `box_h` high, which takes the role of the bottom
+// pill row on the screen that draws no button hint (e.g. playing screen).
+int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h);
+
+// True where the screen is wide enough for the platform to draw the status group.
+bool screen_has_status_group(SDL_Surface* screen);
+
+// Draws a group of button hints: pairs of a button and its label, then NULL. Pass true
+// in `primary` for the group of the main actions, and true in `align_right` to put the
+// group at the right edge. Returns the width of the group.
+int blit_button_group(const char* const* hints, bool primary, SDL_Surface* dst, bool align_right);
+
+// The area of the screen title on a screen whose status group is `status_w` wide.
+// Pass 0 in `status_w` where the platform draws no status group. The area ends one
+// inset before the status group, thus a title never runs under it.
+SDL_Rect screen_title_area(SDL_Surface* screen, int status_w, int text_h);
+
+// Paints `title` at rest in `area` of the surface and returns true. A title that
+// moves is not painted here, and false comes back: its marquee goes on the
+// animation layer, thus a frame of the marquee costs no redraw of the surface.
+bool paint_screen_title(SDL_Surface* screen, ScreenTitle* title, TTF_Font* font,
+                        SDL_Color color, SDL_Rect area, uint32_t now);
+
+// Starts the screen title of a module, on its entry. Pass true in `defer` to
+// let a change of text scroll in while the title moves, as the file browser
+// does; with false a change replaces the text at once. Returns the mode of the
+// title before, thus a nested loop such as the keyboard starts the outer title
+// again with that mode when it returns.
+bool ScreenTitle_start(bool defer);
+
+// Call at the start of each frame, before any paint of the animation layer.
+void ScreenTitle_frameBegin(void);
+
+// Call once at the end of each frame of a module loop, before the presentation
+// of the frame. Pass true in `has_header` where the screen of this frame draws
+// a standard header. Sets `dirty` where the title needs a frame of the surface,
+// and paints the marquee on the animation layer where the row of the list did
+// not paint the layer this frame. A screen with no header leaves the layer to
+// its own painter.
+void ScreenTitle_frameEnd(int* dirty, bool has_header);
+
+// Draws the status group and the screen title `text`. The title of a module is
+// one state that ScreenTitle_start() begins.
+void render_screen_header(SDL_Surface* screen, const char* text, int show_setting);
+
+// Draws the screen title `text` in the room that the status group of width `status_w`
+// leaves. The caller draws the status group.
+void render_screen_title(SDL_Surface* screen, const char* text, int status_w);
 
 // Adjust scroll offset to keep selected item visible
 void adjust_list_scroll(int selected, int* scroll, int items_per_page);
@@ -76,8 +179,10 @@ bool list_page_up(int *selected, int *scroll, int total_count, int items_per_pag
 // Note: non-positive items_per_page is treated as 1.
 bool list_page_down(int *selected, int *scroll, int total_count, int items_per_page);
 
-// Render scroll up/down indicators for lists
-void render_scroll_indicators(SDL_Surface* screen, int scroll, int items_per_page, int total_count);
+// Draws one scroll indicator, `ASSET_SCROLL_UP` or `ASSET_SCROLL_DOWN`, in the
+// color of the unselected secondary role.
+void draw_scroll_indicator(SDL_Surface* screen, int asset, int x, int y);
+
 
 // ============================================
 // Generic List Rendering Helpers
@@ -89,11 +194,31 @@ typedef struct {
     int list_h;          // Total height available for list
     int item_h;          // Height of each item
     int items_per_page;  // Number of visible items
+    int rich_item_h;         // Height of a "rich" row (1.5x), used by podcast/downloader
+    int rich_items_per_page; // Number of visible rich rows
     int max_width;       // Maximum width for content (hw - padding*2)
 } ListLayout;
 
 // Calculate standard list layout based on screen dimensions
 ListLayout calc_list_layout(SDL_Surface* screen);
+
+// The height of a scroll indicator. A list keeps this room under its last row.
+int scroll_indicator_height(void);
+
+// The x of a scroll indicator, centered on the screen.
+int scroll_indicator_x(SDL_Surface* screen);
+
+// Draws the up indicator above the first row where rows are above the page, and
+// the down indicator directly under the last row of the page where rows are below
+// it. Pass the layout of the rows, thus a rich list gives its own row height.
+void render_scroll_indicators(SDL_Surface* screen, const ListLayout* layout, int scroll,
+                              int total_count);
+
+// The same two indicators for a stream that scrolls by the pixel through the
+// viewport of `layout`: `scroll` is the content pixel at the top of the viewport
+// and `content_h` the height of the whole stream.
+void render_stream_scroll_indicators(SDL_Surface* screen, const ListLayout* layout, int scroll,
+                                     int content_h);
 
 // Render a list item's text with optional scrolling for selected items
 // Returns the text_x position after any prefix (useful for chaining)
@@ -110,9 +235,35 @@ typedef struct {
     int text_y;       // Y position for text (vertically centered)
 } ListItemPos;
 
+// The height of a chip. A caller needs it before it draws, to put the chip on the
+// middle of the top pill row.
+int chip_height(void);
+
 // Render a list item's pill background and calculate text position
-// Combines: Fonts_calcListPillWidth + Fonts_drawListItemBg + text position calculation
+// Combines: the row width + draw_list_item_bg + text position calculation
 // prefix_width: extra width to account for (e.g., checkbox, indicator)
+// A chip: a short label in a rectangular outline with no fill, which names the
+// source of what plays. Gives the rectangle that it drew.
+SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y);
+
+// The band behind a whole row, for a row that carries a label at its right edge.
+void draw_list_item_band(SDL_Surface* screen, SDL_Rect* rect);
+
+// The pill behind the row that the cursor is on. Draws nothing for another row.
+void draw_list_item_bg(SDL_Surface* screen, SDL_Rect* rect, bool selected);
+
+// A row whose right edge carries a label gives the width of that label, thus
+// the title truncates before it and the two never overlap. Give 0 where a row
+// has no such label.
+//
+// Such a row draws in four steps: the band of draw_list_item_band(), the
+// label at the right edge, this pill, and then the title. The pill thus covers
+// the label if it ever reaches it, and the title covers nothing else.
+ListItemPos render_list_item_pill_right(SDL_Surface* screen, ListLayout* layout,
+                                        const char* text, char* truncated,
+                                        int y, bool selected, int prefix_width,
+                                        int right_width);
+
 ListItemPos render_list_item_pill(SDL_Surface* screen, ListLayout* layout,
                                    const char* text, char* truncated,
                                    int y, bool selected, int prefix_width);
@@ -131,7 +282,7 @@ typedef struct {
 } ListItemBadgedPos;
 
 // Render a list item's pill with optional right-side badge area (settings-style two-layer)
-// When badge_width > 0 and selected: THEME_COLOR2 outer pill + THEME_COLOR1 inner title pill
+// When badge_width > 0 and selected: the band + the selection pill around the title
 // When badge_width == 0: behaves like render_list_item_pill
 // Pill width considers both title and subtitle (whichever is wider)
 // subtitle can be NULL if not needed for pill sizing
@@ -212,11 +363,15 @@ typedef struct {
     MenuItemBadgeCallback render_badge;   // Optional: render right-side badge
     MenuItemIconCallback get_icon;        // Optional: get icon for item
     MenuItemCustomTextCallback render_text; // Optional: custom text rendering
+    bool title_only;                      // The caller draws the status group: draw the title only
+    int status_w;                         // With title_only: the width of the status group
 } SimpleMenuConfig;
 
-// Render a simple menu with optional customization callbacks
+// Render a simple menu with optional customization callbacks.
+// `menu_scroll` is the index of the first visible row; menus shorter than a
+// page pass 0 and the window logic is inert.
 void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                        const SimpleMenuConfig* config);
+                        int menu_scroll, const SimpleMenuConfig* config);
 
 // ============================================
 // Rounded Rectangle Background
@@ -226,17 +381,6 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
 // Works at any height (unlike pill asset which requires PILL_SIZE)
 // Uses two overlapping rects to create corner inset effect
 void render_rounded_rect_bg(SDL_Surface* screen, int x, int y, int w, int h, uint32_t color);
-
-// ============================================
-// Toast Notification (GPU layer, highest z-index)
-// ============================================
-
-// Render toast notification to GPU layer (above all other content including scroll text)
-// Call this at the end of your render function. Toast auto-hides after TOAST_DURATION.
-void render_toast(SDL_Surface* screen, const char* message, uint32_t toast_time);
-
-// Clear toast from GPU layer (call when leaving screen or clearing state)
-void clear_toast(void);
 
 // ============================================
 // Dialog Box
@@ -264,5 +408,9 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h);
 // y_button_label: label for Y button (e.g., "NEW", "MANAGE"), or NULL for no Y button
 void render_empty_state(SDL_Surface* screen, const char* message,
                         const char* subtitle, const char* y_button_label);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

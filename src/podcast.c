@@ -1,5 +1,5 @@
-#define _GNU_SOURCE
 #include "podcast.h"
+#include "file_utils.h"
 #include "wget_fetch.h"
 #include "radio.h"
 #include "player.h"
@@ -17,8 +17,8 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "wifi.h"
-#include "ui_podcast.h"
 #include "module_common.h"
 #include <sys/statvfs.h>
 
@@ -151,7 +151,7 @@ static pthread_mutex_t download_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t download_thread;
 static volatile bool download_running = false;
 static volatile bool download_should_stop = false;
-static PodcastDownloadProgress download_progress = {0};
+static PodcastDownloadProgress download_progress;
 
 // Current playback state
 static int current_episode_duration_sec = 0;
@@ -256,26 +256,6 @@ static void get_episodes_file_path(const char* feed_id, char* path, int path_siz
     snprintf(path, path_size, "%s/%s/episodes.json", podcast_data_dir, feed_id);
 }
 
-// Create directory recursively
-static void mkdir_recursive(const char* path) {
-    char tmp[512];
-    char* p = NULL;
-    size_t len;
-
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    len = strlen(tmp);
-    if (tmp[len - 1] == '/') tmp[len - 1] = '\0';
-
-    for (p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = '\0';
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    mkdir(tmp, 0755);
-}
-
 // ============================================================================
 // Episode Storage (JSON on disk)
 // ============================================================================
@@ -290,10 +270,12 @@ int Podcast_saveEpisodes(int feed_index, PodcastEpisode* episodes, int count) {
 
     set_feed_id(feed);
 
-    // Create feed directory
+    char feed_relative[sizeof(PODCAST_DATA_DIR "/") + sizeof(feed->feed_id)];
+    snprintf(feed_relative, sizeof(feed_relative), PODCAST_DATA_DIR "/%s", feed->feed_id);
+    if (!userdata_mkdir(feed_relative)) return -1;
+
     char feed_dir[512];
     Podcast_getFeedDataPath(feed->feed_id, feed_dir, sizeof(feed_dir));
-    mkdir_recursive(feed_dir);
 
     // Build episodes JSON
     JSON_Value* root = json_value_init_array();
@@ -407,6 +389,55 @@ int Podcast_loadEpisodePage(int feed_index, int offset) {
     json_value_free(root);
 
     return episode_cache_count;
+}
+
+int Podcast_getEpisodeBriefs(int feed_index, PodcastEpisodeBrief* out, int max) {
+    if (feed_index < 0 || feed_index >= subscription_count || !out || max <= 0) return 0;
+
+    PodcastFeed* feed = &subscriptions[feed_index];
+    set_feed_id(feed);
+
+    char episodes_path[512];
+    get_episodes_file_path(feed->feed_id, episodes_path, sizeof(episodes_path));
+
+    JSON_Value* root = json_parse_file(episodes_path);
+    if (!root) return 0;
+    JSON_Array* arr = json_value_get_array(root);
+    if (!arr) {
+        json_value_free(root);
+        return 0;
+    }
+
+    int total = (int)json_array_get_count(arr);
+    int written = 0;
+    for (int i = 0; i < total && written < max; i++) {
+        JSON_Object* ep_obj = json_array_get_object(arr, i);
+        if (!ep_obj) continue;
+
+        PodcastEpisodeBrief* brief = &out[written];
+        memset(brief, 0, sizeof(*brief));
+        const char* str = json_object_get_string(ep_obj, "guid");
+        if (str) strncpy(brief->guid, str, PODCAST_MAX_GUID - 1);
+        str = json_object_get_string(ep_obj, "title");
+        if (str) strncpy(brief->title, str, PODCAST_MAX_TITLE - 1);
+        brief->progress_sec = (int)json_object_get_number(ep_obj, "progress");
+        brief->is_new = (json_object_get_boolean(ep_obj, "is_new") == 1);
+
+        // progress.json is more recent than episodes.json
+        int cached_progress = Podcast_getProgress(feed->feed_url, brief->guid);
+        if (cached_progress != 0) brief->progress_sec = cached_progress;
+        written++;
+    }
+    json_value_free(root);
+    return written;
+}
+
+int Podcast_getCurrentFeedIndex(void) {
+    return current_feed ? current_feed_index : -1;
+}
+
+int Podcast_getCurrentEpisodeIndex(void) {
+    return current_feed ? current_episode_index : -1;
 }
 
 // Get episode by index (loads from cache, auto-loads page if needed)
@@ -539,7 +570,7 @@ static void download_feed_artwork(PodcastFeed* feed) {
     uint8_t* buf = (uint8_t*)malloc(1024 * 1024);
     if (!buf) return;
 
-    int size = wget_fetch(feed->artwork_url, buf, 1024 * 1024);
+    int size = wget_fetch_bytes(feed->artwork_url, buf, 1024 * 1024);
     if (size > 0 && is_image_data_complete(buf, size)) {
         FILE* f = fopen(art_path, "wb");
         if (f) {
@@ -557,7 +588,9 @@ static void download_feed_artwork(PodcastFeed* feed) {
 int Podcast_init(void) {
     if (podcast_initialized) return 0;  // Already initialized
 
-    snprintf(podcast_data_dir, sizeof(podcast_data_dir), "%s/" PODCAST_DATA_DIR, SHARED_USERDATA_PATH);
+    int data_length = userdata_snpath(PODCAST_DATA_DIR, podcast_data_dir,
+                                      sizeof(podcast_data_dir));
+    if (data_length < 0 || (size_t)data_length >= sizeof(podcast_data_dir)) return -1;
     snprintf(subscriptions_file, sizeof(subscriptions_file), "%s/" PODCAST_SUBSCRIPTIONS_FILE, podcast_data_dir);
     snprintf(progress_file, sizeof(progress_file), "%s/progress.json", podcast_data_dir);
     snprintf(downloads_file, sizeof(downloads_file), "%s/downloads.json", podcast_data_dir);
@@ -565,11 +598,10 @@ int Podcast_init(void) {
     snprintf(continue_listening_file, sizeof(continue_listening_file), "%s/continue_listening.json", podcast_data_dir);
     snprintf(download_dir, sizeof(download_dir), "%s/Podcasts", SDCARD_PATH);
 
-    // Create podcast data directory
-    mkdir_recursive(podcast_data_dir);
+    if (!userdata_mkdir(PODCAST_DATA_DIR)) return -1;
 
     // Create download directory
-    mkdir(download_dir, 0755);
+    if (!mkdir_p(download_dir)) return -1;
 
     // Detect country code from system timezone
     // /etc/localtime symlinks to /tmp/localtime which resolves to the actual timezone
@@ -657,9 +689,6 @@ void Podcast_cleanup(void) {
     // Save progress
     Podcast_flushProgress();
 
-    // Clear UI caches
-    Podcast_clearThumbnailCache();
-
     // Allow full re-initialization on next entry (including auto-resume of downloads)
     podcast_initialized = false;
 }
@@ -699,7 +728,11 @@ PodcastFeed* Podcast_getSubscription(int index) {
 }
 
 int Podcast_subscribe(const char* feed_url) {
-    if (!feed_url || subscription_count >= PODCAST_MAX_SUBSCRIPTIONS) {
+    if (!feed_url) {
+        return -1;
+    }
+    if (subscription_count >= PODCAST_MAX_SUBSCRIPTIONS && !Podcast_isSubscribed(feed_url)) {
+        snprintf(error_message, sizeof(error_message), "Too many podcasts");
         return -1;
     }
 
@@ -715,7 +748,7 @@ int Podcast_subscribe(const char* feed_url) {
         return -1;
     }
 
-    int bytes = wget_fetch(feed_url, buffer, 5 * 1024 * 1024);
+    int bytes = wget_fetch_bytes(feed_url, buffer, 5 * 1024 * 1024);
     if (bytes <= 0) {
         LOG_error("[Podcast] Failed to fetch feed: %s\n", feed_url);
         free(buffer);
@@ -747,6 +780,15 @@ int Podcast_subscribe(const char* feed_url) {
         LOG_error("[Podcast] Failed to parse feed: %s\n", feed_url);
         free(temp_episodes);
         snprintf(error_message, sizeof(error_message), "Invalid RSS feed");
+        return -1;
+    }
+
+    // A feed that holds no episode with an audio file is no podcast: a page of HTML that has
+    // a <title> parses too
+    if (episode_count == 0) {
+        LOG_error("[Podcast] No episode with an enclosure in: %s\n", feed_url);
+        free(temp_episodes);
+        snprintf(error_message, sizeof(error_message), "No episodes in the feed");
         return -1;
     }
 
@@ -928,7 +970,7 @@ int Podcast_refreshFeed(int index) {
     uint8_t* buffer = (uint8_t*)malloc(5 * 1024 * 1024);  // 5MB buffer for large RSS feeds
     if (!buffer) return -1;
 
-    int bytes = wget_fetch(feed->feed_url, buffer, 5 * 1024 * 1024);
+    int bytes = wget_fetch_bytes(feed->feed_url, buffer, 5 * 1024 * 1024);
     if (bytes <= 0) {
         free(buffer);
         return -1;
@@ -1601,7 +1643,10 @@ void Podcast_getEpisodeLocalPath(PodcastFeed* feed, int episode_index, char* buf
     safe_feed[sizeof(safe_feed) - 1] = '\0';
     sanitize_for_filename(safe_feed);
 
-    snprintf(buf, buf_size, "%s/%s/%s.mp3", download_dir, safe_feed, safe_title);
+    // The extension of the enclosure: the player picks its decoder by it, and Radio
+    // France serves .m4a, which the MP3 decoder refuses.
+    snprintf(buf, buf_size, "%s/%s/%s.%s", download_dir, safe_feed, safe_title,
+             podcast_enclosure_extension(ep->url));
 }
 
 // Check if episode file exists locally
@@ -1751,6 +1796,30 @@ static int Podcast_startDownloads(void) {
 
 #define PODCAST_MAX_RETRIES 3
 
+// What the download callback needs beyond the byte count: the episode whose row
+// shows the percentage, and the size the server promised
+typedef struct {
+    PodcastDownloadItem* item;
+    long                 total_bytes;
+} EpisodeProgress;
+
+static bool episode_progress(long downloaded, int speed_bps, void* ctx) {
+    EpisodeProgress* progress = (EpisodeProgress*)ctx;
+
+    if (progress->total_bytes > 0) {
+        // Hold at 99 until the transfer is verified; 100 is the caller's to set
+        int pct = (int)((downloaded * 100) / progress->total_bytes);
+        progress->item->progress_percent = pct > 99 ? 99 : pct;
+    }
+
+    download_progress.speed_bps = speed_bps;
+    download_progress.eta_sec = (speed_bps > 0 && progress->total_bytes > downloaded)
+        ? (int)((progress->total_bytes - downloaded) / speed_bps)
+        : 0;
+
+    return !download_should_stop;
+}
+
 static void* download_thread_func(void* arg) {
     (void)arg;
     PWR_pinToCores(CPU_CORE_EFFICIENCY);
@@ -1781,7 +1850,13 @@ static void* download_thread_func(void* arg) {
 
         char dir_path[512];
         snprintf(dir_path, sizeof(dir_path), "%s/%s", download_dir, safe_feed);
-        mkdir(dir_path, 0755);
+        if (!mkdir_p(dir_path)) {
+            item->status = PODCAST_DOWNLOAD_FAILED;
+            snprintf(download_progress.error_message, sizeof(download_progress.error_message),
+                     "Cannot create download directory");
+            download_progress.failed_count++;
+            continue;
+        }
 
         // Check disk space before downloading
         struct statvfs fs_stat;
@@ -1796,6 +1871,14 @@ static void* download_thread_func(void* arg) {
                 continue;
             }
         }
+
+        long file_size = wget_probe_size(item->url);
+
+        // Ask the server how big the episode is, so progress can be a percentage
+        EpisodeProgress progress = {
+            .item        = item,
+            .total_bytes = file_size,
+        };
 
         // Retry loop with WiFi check and exponential backoff
         int retries = 0;
@@ -1812,10 +1895,7 @@ static void* download_thread_func(void* arg) {
             }
 
             bytes = wget_download_file(item->url, item->local_path,
-                                       &item->progress_percent,
-                                       &download_should_stop,
-                                       &download_progress.speed_bps,
-                                       &download_progress.eta_sec);
+                                       episode_progress, &progress);
 
             if (bytes > 0 || download_should_stop) break;
 

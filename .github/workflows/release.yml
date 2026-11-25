@@ -7,50 +7,74 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
-      - name: Checkout NextUI (build dependencies)
-        uses: actions/checkout@v4
-        with:
-          repository: LoveRetro/NextUI
-          path: NextUI
+      - name: Require a tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" != tag ]; then
+            echo 'A release requires a tag.' >&2
+            exit 1
+          fi
 
       - name: Checkout Music Player
-        uses: actions/checkout@v4
-        with:
-          path: NextUI/workspace/nextui-music-player
+        uses: actions/checkout@v7
 
-      - name: Build for tg5040
+      - name: Check release version
+        id: version
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}/NextUI/workspace:/root/workspace \
-            ghcr.io/loveretro/tg5040-toolchain:latest \
-            /bin/bash -c 'source ~/.bashrc && cd /root/workspace/tg5040/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5040'
+          VERSION="$GITHUB_REF_NAME"
+          ./dev version validate-release "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo 'prerelease=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'prerelease=false' >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build for tg5050
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}/NextUI/workspace:/root/workspace \
-            ghcr.io/loveretro/tg5050-toolchain:latest \
-            /bin/bash -c 'source ~/.bashrc && cp /root/workspace/nextui-music-player/bin/tg5050/libfdk-aac.so* $PREFIX/lib/ && cd /root/workspace/tg5050/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5050'
+  test:
+    needs: version
+    uses: ./.github/workflows/test.yml
 
-      - name: Package release zip
-        run: |
-          cd ${{ github.workspace }}/NextUI/workspace/nextui-music-player
-          sudo rm -rf .github src .git .gitignore LICENSE README.md
-          zip -r ../Music.Player.pak.zip .
+  release:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
+    steps:
+      - name: Checkout Music Player
+        uses: actions/checkout@v7
+
+      - name: Build and package debug
+        run: ./dev dist all --strict --debug --version "$VERSION"
+
+      - name: Build and package release
+        run: ./dev dist all --strict --version "$VERSION"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          FLAGS=(--latest)
+          if [ "$PRERELEASE" = true ]; then
+            FLAGS=(--prerelease --latest=false)
+          fi
           gh release create "$VERSION" \
-            --repo ${{ github.repository }} \
+            --verify-tag \
             --title "$VERSION" \
             --generate-notes \
-            "${{ github.workspace }}/NextUI/workspace/Music.Player.pak.zip"
+            "${FLAGS[@]}" \
+            "${{ github.workspace }}/dist/Music.Player.pak.zip" \
+            "${{ github.workspace }}"/dist/*.pakz

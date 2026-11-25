@@ -1,0 +1,3962 @@
+#!/usr/bin/env python3
+#
+# Configuration:
+#   Copy .dev.example to .dev
+# Configuration options:
+#   CONTAINER_RUNTIME: docker (default) or podman
+#     Could be set per call with --docker or --podman
+
+import argparse
+import contextlib
+import fcntl
+import glob
+import hashlib
+import http.client
+import json
+import os
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.parse
+import urllib.request
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+
+
+ROOT = Path(__file__).resolve().parent
+DEVICE_PLATFORMS = ("tg5040", "tg5050", "my355", "h700")
+ALL_PLATFORMS = DEVICE_PLATFORMS + ("desktop",)
+BUILD_KINDS = ("debug", "release")
+PAK_NAME = "Music Player.pak"
+REMOTE_ROOT = "/mnt/SDCARD/Tools"
+REMOTE_USERDATA = "/mnt/SDCARD/.userdata/shared/music-player"
+RESTART_FLAG = "/tmp/nextui-music-player.restart"
+MANIFEST = ROOT / "dist.manifest"
+DEPS_MANIFEST = ROOT / "deps.json"
+PIN_FILE_NAME = ".music-player-pinned-version"
+DEPS_LOCK = "deps/.fetch.lock"
+CONTAINER_PROJECT = "/root/workspace/nextui-music-player"
+DIST_DIR = ROOT / "dist"
+DIST_PAK = DIST_DIR / PAK_NAME
+# Each platform folder holds the tree that its .pakz package puts at the root
+# of the SD card.
+DIST_PAKZ_DIR = DIST_DIR / "pakz"
+PAK_FILE = ROOT / "pak.json"
+SELFUPDATE_HEADER = ROOT / "src/selfupdate.h"
+QR_CODE_HEADER = ROOT / "src/qr_code_data.h"
+QR_CODE_PNG = ROOT / "src/qr-code.png"
+DEV_CONFIG_FILE = ROOT / ".dev"
+DESKTOP_PREFIX = Path("/var/tmp/nextui")
+DESKTOP_SDCARD = DESKTOP_PREFIX / "sdcard"
+# The directories of the sdcard that an isolated desktop run reads from the
+# shared sdcard, and does not write.
+SHARED_SDCARD_DIRS = (".system", "Tools", "Music")
+DEFAULT_CONTAINER_RUNTIME = "docker"
+RADIO_SAMPLE_SIZE = 64 * 1024
+RADIO_TIMEOUT_SECONDS = 15
+RED = "\033[1;31m"
+YELLOW = "\033[1;33m"
+
+ALIASES = {
+    "tg5040": ("tg5040", "5040", "brick", "brickpro", "tsp", "smartpro"),
+    "tg5050": ("tg5050", "5050", "tsps", "smartpros"),
+    "my355": ("my355", "355", "flip", "miyooflip", "miyoo"),
+    "h700": ("h700", "rgxx", "rgsp", "rg", "anbernic"),
+    "desktop": ("desktop",),
+}
+
+# Platforms whose NextUI tree is not the main checkout. my355 is not carried by
+# upstream NextUI, so it builds against its own pinned fork.
+PLATFORM_DEPENDENCIES = {
+    "my355": "nextui-my355",
+}
+
+# Where a toolchain image keeps the shared libraries of its sysroot.
+SYSROOT_LIB = "/opt/aarch64-nextui-linux-gnu/aarch64-nextui-linux-gnu/libc/usr/lib"
+
+CPUINFO_PLATFORMS = {
+    "TG5040": "tg5040",
+    "TG3040": "tg5040",
+    "TG4040": "tg5040",
+    "TG5050": "tg5050",
+    "0xd05": "my355",
+}
+
+
+class DevError(Exception):
+    pass
+
+
+def sorted_subactions(action):
+    """Returns the commands of a subparsers action in alphabetical order of their
+    primary names. An alias gets no entry of its own."""
+    return sorted(action._get_subactions(), key=lambda command: command.dest)
+
+
+class CommandHelpFormatter(argparse.HelpFormatter):
+    def _format_action(self, action):
+        if isinstance(action, argparse._SubParsersAction):
+            format_action = super()._format_action
+            return "".join(
+                format_action(command) for command in sorted_subactions(action)
+            )
+        return super()._format_action(action)
+
+
+class RawEpilogCommandHelpFormatter(
+    CommandHelpFormatter, argparse.RawDescriptionHelpFormatter
+):
+    """Keeps the line breaks of the description and the epilog."""
+
+
+@dataclass(frozen=True)
+class PakLibrary:
+    """A shared library that the pak carries because the firmware lacks it.
+
+    The build copies `source` out of the toolchain image of `image` into
+    bin/<platform>/<name> on every device build, thus no library is a file in
+    git. `name` is the SONAME, which is what the loader looks up. `source` is
+    the SONAME path in the sysroot as well, thus a new libtool suffix in the
+    image does not stop the copy. Set `link` where the sysroot of the
+    platform has no copy and the link needs one.
+    """
+
+    name: str
+    image: str
+    source: str
+    link: bool = False
+
+
+# tg5050 and my355 use the AAC library from the tg5040 image.
+TG5040_FDK_AAC = PakLibrary(
+    name   = "libfdk-aac.so.1",
+    image  = "tg5040",
+    source = SYSROOT_LIB + "/libfdk-aac.so.1",
+    link   = True,
+)
+
+# SDL2_image 2.9 with JPEG and PNG decoders. Flip and h700 firmware has no
+# JPEG decoder.
+MY355_SDL2_IMAGE = PakLibrary(
+    name   = "libSDL2_image-2.0.so.0",
+    image  = "my355",
+    source = SYSROOT_LIB + "/libSDL2_image-2.0.so.0",
+)
+
+H700_FDK_AAC = PakLibrary(
+    name   = "libfdk-aac.so.1",
+    image  = "h700",
+    source = SYSROOT_LIB + "/libfdk-aac.so.1",
+)
+
+PAK_LIBRARIES = {
+    "tg5050": (TG5040_FDK_AAC,),
+    "my355": (TG5040_FDK_AAC, MY355_SDL2_IMAGE),
+    "h700": (H700_FDK_AAC, MY355_SDL2_IMAGE),
+}
+
+
+@dataclass(frozen=True)
+class Device:
+    serial: str
+    state: str
+    platform: str = "unknown"
+    hardware: str = "-"
+
+
+def load_container_runtime():
+    runtime = DEFAULT_CONTAINER_RUNTIME
+    if not DEV_CONFIG_FILE.exists():
+        return runtime
+
+    for line_number, raw_line in enumerate(
+        DEV_CONFIG_FILE.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise DevError(".dev:{}: expected KEY=VALUE".format(line_number))
+        key, value = (part.strip() for part in line.split("=", 1))
+        if key != "CONTAINER_RUNTIME":
+            raise DevError(".dev:{}: unknown setting {}".format(line_number, key))
+        runtime = value
+
+    if runtime not in ("docker", "podman"):
+        raise DevError(".dev: CONTAINER_RUNTIME must be docker or podman")
+    return runtime
+
+
+def container_runtime(args):
+    return args.container_runtime or load_container_runtime()
+
+
+def run_command(args, cwd=ROOT, env=None, capture=False, check=True, stdin=None):
+    if capture:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd),
+            env=env,
+            input=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    else:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd),
+            env=env,
+            input=stdin,
+            check=False,
+        )
+    if check and result.returncode:
+        if capture and result.stderr:
+            sys.stderr.write(result.stderr.decode(errors="replace"))
+        raise DevError("Command failed: " + " ".join(shlex.quote(str(a)) for a in args))
+    return result
+
+
+@dataclass(frozen=True)
+class Dependency:
+    name: str
+    path: str
+    git_url: str
+    ref: str
+    patches: str = ""
+
+    @property
+    def root(self):
+        return ROOT / self.path
+
+    @property
+    def patch_files(self):
+        """Every patch to apply after the checkout, in name order."""
+        if not self.patches:
+            return []
+        return sorted((ROOT / self.patches).glob("*.patch"))
+
+    @property
+    def pin_file(self):
+        return self.root / PIN_FILE_NAME
+
+    @property
+    def make_root(self):
+        """NEXTUI_ROOT as the makefile sees it, relative to src/."""
+        return "../{}/workspace".format(self.path)
+
+
+@dataclass(frozen=True)
+class PinStatus:
+    dependency: Dependency
+    state: str
+    detail: str
+
+
+def colorize(text, color):
+    if not sys.stdout.isatty():
+        return text
+    return color + text + "\033[0m"
+
+
+def short(commit):
+    return commit[:8]
+
+
+def read_deps_manifest():
+    if not DEPS_MANIFEST.exists():
+        raise DevError("Missing " + DEPS_MANIFEST.name)
+
+    try:
+        with DEPS_MANIFEST.open(encoding="utf-8") as source:
+            return json.load(source)
+    except (OSError, json.JSONDecodeError) as error:
+        raise DevError("{}: {}".format(DEPS_MANIFEST.name, error))
+
+
+def load_dependencies():
+    """Read the build dependencies, each pinned to a tag, branch, or commit."""
+    manifest = read_deps_manifest()
+    dependencies = []
+    for index, entry in enumerate(manifest.get("dependencies", [])):
+        missing = [
+            key for key in ("name", "path", "git_url", "ref") if key not in entry
+        ]
+        if missing:
+            raise DevError(
+                "{}: dependency {} is missing {}".format(
+                    DEPS_MANIFEST.name, index, ", ".join(missing)
+                )
+            )
+        dependencies.append(
+            Dependency(
+                entry["name"],
+                entry["path"],
+                entry["git_url"],
+                entry["ref"],
+                entry.get("patches", ""),
+            )
+        )
+
+    if not dependencies:
+        raise DevError(DEPS_MANIFEST.name + " lists no dependencies")
+    return dependencies
+
+
+def select_dependency(dependencies, name):
+    if name is None:
+        if len(dependencies) == 1:
+            return dependencies[0]
+        raise DevError(
+            "Name the dependency: " + ", ".join(d.name for d in dependencies)
+        )
+    for dependency in dependencies:
+        if dependency.name == name:
+            return dependency
+    raise DevError("Unknown dependency: " + name)
+
+
+def nextui_dependency(platform=None):
+    name = PLATFORM_DEPENDENCIES.get(platform, "nextui")
+    return select_dependency(load_dependencies(), name)
+
+
+def git(root, *args, check=True):
+    """Run git in a checkout and return its stdout, minus trailing newlines.
+    Leading whitespace is significant - `status --porcelain` encodes the staged
+    state in column one."""
+    command = ["git", "-C", str(root)] + [str(arg) for arg in args]
+    result = run_command(command, capture=True, check=check)
+    return result.stdout.decode(errors="replace").rstrip()
+
+
+def git_succeeds(root, *args):
+    command = ["git", "-C", str(root)] + [str(arg) for arg in args]
+    return run_command(command, capture=True, check=False).returncode == 0
+
+
+def read_pin(dependency):
+    """Parse the pin marker, or None when the checkout is user-managed."""
+    if not dependency.pin_file.exists():
+        return None
+    values = {}
+    for raw_line in dependency.pin_file.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        values[key] = value
+    return values
+
+
+def patch_set_digest(dependency):
+    """Identify the patch set by its content, thus an edited patch is a new set."""
+    digest = hashlib.sha256()
+    for path in dependency.patch_files:
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def patched_paths(dependency):
+    """Every file in the checkout that the patch set touches. Both sides of
+    each header, thus a patch that deletes a file also names it."""
+    paths = set()
+    for path in dependency.patch_files:
+        for line in path.read_text(errors="replace").splitlines():
+            if line.startswith("--- a/") or line.startswith("+++ b/"):
+                paths.add(line[6:].split("\t")[0])
+    return sorted(paths)
+
+
+def worktree_digest(dependency):
+    """Identify the content of the patched files. A hand edit to one of them
+    gives another value, thus it does not pass as the patch set."""
+    paths = patched_paths(dependency)
+    if not paths:
+        return ""
+    digest = hashlib.sha256()
+    for path in paths:
+        blob = git(dependency.root, "hash-object", "--", path, check=False)
+        full = dependency.root / path
+        # The mode goes in as well. A patch can set the bit that makes a file
+        # executable, and a person can set it by hand, thus the content alone
+        # does not say that the checkout holds the patch set.
+        mode = "x" if full.is_file() and os.access(str(full), os.X_OK) else "-"
+        digest.update("{} {} {}\n".format(path, blob or "missing", mode).encode())
+    return digest.hexdigest()
+
+
+def is_patched(dependency, pin):
+    """True where the local changes in the checkout are exactly the patch set
+    that the pin marker recorded, and nothing else."""
+    if not dependency.patch_files:
+        return False
+    if pin.get("patches") != patch_set_digest(dependency):
+        return False
+    if pin.get("worktree") != worktree_digest(dependency):
+        return False
+    changed = {
+        line[3:]
+        for line in git(
+            dependency.root, "status", "--porcelain", "--untracked-files=no",
+            check=False,
+        ).splitlines()
+    }
+    expected = set(patched_paths(dependency))
+    # A patch that creates a file leaves that file untracked, thus the scan above
+    # does not show it. Ask about the paths of the patch set only, so that build
+    # output elsewhere in the checkout does not count as a change.
+    for path in expected - changed:
+        if not (dependency.root / path).is_file():
+            continue
+        if not git_succeeds(dependency.root, "ls-files", "--error-unmatch", "--", path):
+            changed.add(path)
+    return changed == expected
+
+
+def recorded_paths(pin):
+    """The paths that the patch set wrote when the marker was written. An older
+    marker has no such line, thus the caller gets an empty list."""
+    try:
+        value = json.loads(pin.get("paths", "[]"))
+    except ValueError:
+        return []
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def holds_recorded_patches(dependency, pin):
+    """True where the checkout still holds exactly what the marker recorded,
+    whatever the patch set says now. This is how a patch that went away is told
+    from a hand edit."""
+    paths = recorded_paths(pin)
+    if not paths or not pin.get("worktree"):
+        return False
+    digest = hashlib.sha256()
+    for path in paths:
+        blob = git(dependency.root, "hash-object", "--", path, check=False)
+        full = dependency.root / path
+        mode = "x" if full.is_file() and os.access(str(full), os.X_OK) else "-"
+        digest.update("{} {} {}\n".format(path, blob or "missing", mode).encode())
+    return digest.hexdigest() == pin.get("worktree")
+
+
+def drop_recorded_patches(dependency, pin):
+    """Put the files that the recorded patch set wrote back to the revision that
+    the checkout sits on. The patch files that made those changes can be gone,
+    thus a reverse of the current set cannot do this."""
+    paths = recorded_paths(pin)
+    if not paths:
+        return
+    # A path that git does not track is a file that the patch created, thus to
+    # put it back is to remove it. git checkout takes the rest. The two go apart,
+    # because git checkout fails for the whole list where one path is not in the
+    # index, and it then restores nothing.
+    tracked = []
+    for path in paths:
+        if git_succeeds(dependency.root, "ls-files", "--error-unmatch", "--", path):
+            tracked.append(path)
+            continue
+        created = dependency.root / path
+        if created.is_file():
+            created.unlink()
+    if tracked:
+        run_command(
+            ["git", "-C", str(dependency.root), "checkout", "--"] + tracked,
+            capture=True,
+            check=False,
+        )
+
+
+def apply_patches(dependency):
+    """Put the patch set on a clean checkout. A patch that does not apply takes
+    back the patches that applied before it, thus the checkout stays on the
+    pinned revision and the next build does not compile a half-patched tree."""
+    applied = []
+    for path in dependency.patch_files:
+        print(
+            "Applying {} to {}".format(path.name, dependency.name), flush=True
+        )
+        result = run_command(
+            ["git", "-C", str(dependency.root), "apply", str(path)],
+            capture=True,
+            check=False,
+        )
+        if result.returncode:
+            for done in reversed(applied):
+                run_command(
+                    ["git", "-C", str(dependency.root), "apply", "--reverse", str(done)],
+                    capture=True,
+                    check=False,
+                )
+            raise DevError(
+                "{}: {} does not apply - refresh it from the pull request "
+                "that it comes from\n{}".format(
+                    dependency.name,
+                    path.name,
+                    result.stderr.decode(errors="replace").strip(),
+                )
+            )
+        applied.append(path)
+
+
+def remove_patches(dependency):
+    """Take the patch set back out, thus a move to another commit starts clean."""
+    for path in reversed(dependency.patch_files):
+        run_command(
+            ["git", "-C", str(dependency.root), "apply", "--reverse", str(path)],
+            capture=True,
+            check=False,
+        )
+
+
+def describe_patches(dependency):
+    """Name the patch set for a status line, or an empty string where the
+    dependency takes no patches."""
+    count = len(dependency.patch_files)
+    if not count:
+        return ""
+    return " + {} patch{}".format(count, "" if count == 1 else "es")
+
+
+def write_pin(dependency, ref, commit):
+    """Record how the checkout was fetched, exactly what it sits on, and what
+    the patch set left in the working tree."""
+    dependency.pin_file.write_text(
+        "# Written by ./dev deps. Editing or removing this file marks the\n"
+        "# checkout as user-managed, and every build warns about it.\n"
+        "name={}\ngit_url={}\nref={}\ncommit={}\npatches={}\nworktree={}\n"
+        "paths={}\n".format(
+            dependency.name,
+            dependency.git_url,
+            ref,
+            commit,
+            patch_set_digest(dependency),
+            worktree_digest(dependency),
+            json.dumps(patched_paths(dependency)),
+        )
+    )
+    exclude_pin(dependency)
+
+
+def exclude_pin(dependency):
+    """Keep the marker out of the dependency's own git status."""
+    # In a worktree, .git is a file, and the exclude file is in the common
+    # directory.
+    common = git(dependency.root, "rev-parse", "--path-format=absolute",
+                 "--git-common-dir", check=False)
+    if not common:
+        return
+    exclude = Path(common) / "info" / "exclude"
+    if not exclude.parent.is_dir():
+        return
+    lines = exclude.read_text().splitlines() if exclude.exists() else []
+    if PIN_FILE_NAME in lines:
+        return
+    lines.append(PIN_FILE_NAME)
+    exclude.write_text("\n".join(lines) + "\n")
+
+
+def dependency_stamp(dependency):
+    """File whose mtime tracks when the checkout last moved."""
+    for candidate in (dependency.pin_file, dependency.root / ".git" / "HEAD"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def dependency_status(dependency):
+    """Classify a checkout as missing, pinned, stale (pin moved on), or unpinned."""
+    root = dependency.root
+    if not root.is_dir():
+        return PinStatus(dependency, "missing", "not checked out")
+    if not (root / ".git").exists():
+        return PinStatus(dependency, "unpinned", "not a git checkout")
+
+    head = git(root, "rev-parse", "HEAD", check=False)
+    if not head:
+        return PinStatus(dependency, "unpinned", "no HEAD commit")
+
+    dirty = bool(git(root, "status", "--porcelain", "--untracked-files=no"))
+    where = (
+        "{} with local changes".format(short(head))
+        if dirty
+        else "clean checkout of {}".format(short(head))
+    )
+
+    pin = read_pin(dependency)
+    if not pin:
+        return PinStatus(dependency, "unpinned", "no pin marker, " + where)
+
+    ref = pin.get("ref", "")
+    if pin.get("commit") != head:
+        return PinStatus(
+            dependency,
+            "unpinned",
+            "{}, not the pinned {} ({})".format(
+                where, ref or "?", short(pin.get("commit", "?"))
+            ),
+        )
+    if ref != dependency.ref:
+        return PinStatus(
+            dependency,
+            "stale",
+            "on {}, manifest pins {}".format(ref, dependency.ref),
+        )
+    # A patch that only creates files leaves no tracked change, thus the test for
+    # the patch set comes before the test for a dirty checkout.
+    if is_patched(dependency, pin):
+        return PinStatus(
+            dependency,
+            "pinned",
+            "{} ({}){}".format(ref, short(head), describe_patches(dependency)),
+        )
+    if dirty:
+        return PinStatus(
+            dependency,
+            "modified",
+            "{} with local changes{}".format(
+                ref, " beyond the patch set" if dependency.patch_files else ""
+            ),
+        )
+    if dependency.patch_files:
+        return PinStatus(
+            dependency,
+            "unpatched",
+            "{} ({}), the patch set is not applied".format(ref, short(head)),
+        )
+    return PinStatus(dependency, "pinned", "{} ({})".format(ref, short(head)))
+
+
+def describe(status):
+    """Name the dependency and where it lives, then what it is sitting on."""
+    return "{} at {}/ - {}".format(
+        status.dependency.name, status.dependency.path, status.detail
+    )
+
+
+def warn_unpinned(statuses):
+    lines = ["MODIFIED DEPENDENCY"]
+    for status in statuses:
+        lines.append(describe(status))
+    lines.append("Run ./dev deps fetch --force to restore the checkout.")
+    width = max(len(line) for line in lines) + 4
+    border = "!" * width
+    block = [border]
+    block.extend("! " + line.ljust(width - 4) + " !" for line in lines)
+    block.append(border)
+    print(colorize("\n".join(block), YELLOW), file=sys.stderr, flush=True)
+
+
+def resolve_ref(root, ref, remote):
+    """Resolve a ref to a commit. Branches must resolve to the remote tip, so
+    <remote>/<ref> wins; tags and raw revisions fall through to the bare name."""
+    for candidate in (remote + "/" + ref, ref):
+        commit = git(
+            root, "rev-parse", "--verify", "--quiet", candidate + "^{commit}",
+            check=False,
+        )
+        if commit:
+            return commit
+    return ""
+
+
+def checkout_dependency(dependency, ref, commit):
+    """Detach onto commit, warning when local edits are carried across."""
+    root = dependency.root
+    if is_patched(dependency, read_pin(dependency) or {}):
+        remove_patches(dependency)
+    if git(root, "status", "--porcelain", "--untracked-files=no", check=False):
+        print(
+            colorize(
+                "WARNING: {} has modified files; they are carried over".format(
+                    dependency.path
+                ),
+                YELLOW,
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+
+    print(
+        "Checking out {} at {} ({})".format(dependency.name, ref, short(commit)),
+        flush=True,
+    )
+    result = run_command(
+        ["git", "-C", str(root), "checkout", "--detach", commit],
+        capture=True,
+        check=False,
+    )
+    if result.returncode:
+        raise DevError(
+            "{}: cannot switch to {} ({})\n{}".format(
+                dependency.name,
+                ref,
+                short(commit),
+                result.stderr.decode(errors="replace").strip(),
+            )
+        )
+    apply_patches(dependency)
+    write_pin(dependency, ref, commit)
+
+
+# The origin that --origin of `deps fetch` names: a path, ORIGIN_NONE, or None
+# when the command names no origin.
+REQUESTED_ORIGIN = None
+ORIGIN_NONE = "none"
+
+
+def main_worktree(checkout):
+    """The main worktree of the repository of `checkout`, or None when `checkout`
+    is the main worktree."""
+    common = git(checkout, "rev-parse", "--path-format=absolute", "--git-common-dir",
+                 check=False)
+    if not common or Path(common) == (checkout / ".git").resolve():
+        return None
+    return Path(common).parent
+
+
+def checkout_origin():
+    """The checkout whose NextUI clones and archives this checkout takes, or
+    None when this checkout clones and downloads its own. Without --origin, a
+    linked git worktree takes the main worktree."""
+    if REQUESTED_ORIGIN == ORIGIN_NONE:
+        return None
+    if REQUESTED_ORIGIN is not None:
+        origin = Path(REQUESTED_ORIGIN).expanduser().resolve()
+        if origin == ROOT:
+            raise DevError("--origin names this checkout")
+    else:
+        origin = main_worktree(ROOT)
+        if origin is None:
+            return None
+    if not (origin / DEPS_MANIFEST.name).is_file():
+        raise DevError("{} is not a checkout of the app: it has no {}".format(
+            origin, DEPS_MANIFEST.name))
+    return origin
+
+
+def normalized_git_url(url):
+    url = url.rstrip("/")
+    return url[:-len(".git")] if url.endswith(".git") else url
+
+
+def manifest_remote(dependency, root):
+    """The remote of the clone at `root` whose URL is the git_url of the manifest.
+    The clone of an origin can have more remotes, and its origin can be a fork."""
+    wanted = normalized_git_url(dependency.git_url)
+    for name in git(root, "remote", check=False).split():
+        # The URL as configured. `remote get-url` applies url.*.insteadOf, thus
+        # it can differ from the URL that the clone was made from.
+        url = git(root, "config", "--get", "remote.{}.url".format(name), check=False)
+        if normalized_git_url(url) == wanted:
+            return name
+    raise DevError(
+        "{}: no remote of {} has the URL {}. Add a remote with that URL.".format(
+            dependency.name, root, dependency.git_url
+        )
+    )
+
+
+@contextlib.contextmanager
+def file_lock(path, purpose):
+    """Hold an exclusive lock on `path` for the block. Another ./dev that holds it
+    makes this one wait, and the wait prints `purpose`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("Waiting for another ./dev that {}".format(purpose), flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+# The lock file that the ./dev which started this one holds, for a ./dev that
+# it starts in the origin.
+HELD_DEPS_LOCK_ENV = "DEV_HELD_DEPS_LOCK"
+
+
+def dependency_lock(checkout=ROOT):
+    """The lock of the dependency checkouts of `checkout`. A ./dev that reads or
+    changes them holds it, thus it never sees a checkout that another ./dev
+    makes or removes at the same time. A secondary checkout holds the lock of
+    its origin too, while it uses the clones of the origin."""
+    path = (checkout / DEPS_LOCK).resolve()
+    if os.environ.get(HELD_DEPS_LOCK_ENV) == str(path):
+        return contextlib.nullcontext()
+    return file_lock(path, "fetches the dependencies of " + str(checkout))
+
+
+def add_worktree_of(dependency, source):
+    """Add the checkout as a worktree of the clone at `source`, at the pinned
+    commit, with the patch set applied."""
+    remote = manifest_remote(dependency, source)
+    commit = resolve_ref(source, dependency.ref, remote)
+    if not commit:
+        print("{}: fetching tags for {} into {}".format(
+            dependency.name, dependency.ref, source), flush=True)
+        run_command(["git", "-C", str(source), "fetch", "--tags", remote])
+        commit = resolve_ref(source, dependency.ref, remote)
+    if not commit:
+        raise DevError("{}: {} is not in {}".format(
+            dependency.name, dependency.ref, dependency.git_url))
+    print("Adding {} as a worktree of {}".format(dependency.path, source), flush=True)
+    # A worktree whose directory was deleted by hand stays registered, and
+    # blocks the add.
+    git(source, "worktree", "prune")
+    git(source, "worktree", "add", "--detach", dependency.root, commit)
+    apply_patches(dependency)
+    write_pin(dependency, dependency.ref, commit)
+
+
+def add_dependency_worktree(dependency, origin):
+    """Make the checkout a git worktree of the clone of the origin, thus it shares
+    the history of the origin and clones nothing."""
+    source = origin / dependency.path
+    if not (source / ".git").exists() and main_worktree(origin) == ROOT:
+        # The fetch in the origin takes this checkout as its origin, and waits
+        # for the lock that this ./dev holds.
+        raise DevError(
+            "{} takes its dependencies from this checkout, and has no {}. Run "
+            "./dev deps fetch --origin none here first.".format(origin, dependency.path)
+        )
+    with dependency_lock(origin):
+        if not (source / ".git").exists():
+            print("{}: {} has no {}; fetching it there first".format(
+                dependency.name, origin, dependency.path), flush=True)
+            env = os.environ.copy()
+            env[HELD_DEPS_LOCK_ENV] = str((origin / DEPS_LOCK).resolve())
+            run_command([str(origin / "dev"), "deps", "fetch"], cwd=origin, env=env)
+            if not (source / ".git").exists():
+                raise DevError("{}: {} still has no {}".format(
+                    dependency.name, origin, dependency.path))
+        add_worktree_of(dependency, source)
+
+
+def clone_dependency(dependency):
+    origin = checkout_origin()
+    if origin is not None:
+        add_dependency_worktree(dependency, origin)
+        return
+    print(
+        "Cloning {} into {}".format(dependency.git_url, dependency.path), flush=True
+    )
+    run_command(["git", "clone", dependency.git_url, str(dependency.root)])
+    commit = resolve_ref(dependency.root, dependency.ref, "origin")
+    if not commit:
+        raise DevError(
+            "{}: {} is not in {}".format(
+                dependency.name, dependency.ref, dependency.git_url
+            )
+        )
+    checkout_dependency(dependency, dependency.ref, commit)
+
+
+def fetch_dependency(dependency):
+    """Make the checkout exist, without touching the network when it already
+    does. A ref edited in the manifest is followed if it resolves locally or
+    after a fetch of the remote tags; anything else is `./dev deps update`."""
+    status = dependency_status(dependency)
+    if status.state == "missing":
+        clone_dependency(dependency)
+        return True
+
+    pin = read_pin(dependency) or {}
+    if (
+        pin.get("commit") == git(dependency.root, "rev-parse", "HEAD", check=False)
+        and pin.get("patches") not in (None, patch_set_digest(dependency))
+        and holds_recorded_patches(dependency, pin)
+    ):
+        # The patch set moved on and the checkout still holds the old one. Put
+        # the files back and apply what the manifest names now, thus a patch
+        # that went away leaves nothing of itself.
+        print(
+            "{}: the patch set changed; restoring the checkout".format(
+                dependency.name
+            ),
+            flush=True,
+        )
+        drop_recorded_patches(dependency, pin)
+        apply_patches(dependency)
+        write_pin(dependency, dependency.ref, git(dependency.root, "rev-parse", "HEAD"))
+        return True
+
+    if status.state == "unpatched":
+        apply_patches(dependency)
+        write_pin(dependency, dependency.ref, git(dependency.root, "rev-parse", "HEAD"))
+        return True
+
+    if status.state == "modified" and dependency.patch_files:
+        # The marker cannot always say that the checkout holds the patch set. An
+        # older version of this tool wrote a marker of another shape, and a
+        # digest that this tool computes can change. Ask the checkout instead:
+        # take the patch set out, and see what is left. A clean tree says the
+        # local changes were the patch set and nothing else.
+        remove_patches(dependency)
+        if git(dependency.root, "status", "--porcelain", "--untracked-files=no",
+               check=False):
+            apply_patches(dependency)
+            return False
+        print(
+            "{}: the checkout holds the patch set; recording it".format(
+                dependency.name
+            ),
+            flush=True,
+        )
+        apply_patches(dependency)
+        write_pin(dependency, dependency.ref, git(dependency.root, "rev-parse", "HEAD"))
+        return True
+
+    if status.state != "stale":
+        return False
+
+    remote = manifest_remote(dependency, dependency.root)
+    commit = resolve_ref(dependency.root, dependency.ref, remote)
+    if not commit:
+        # A clone only holds the tags that existed at the time, thus a manifest
+        # that moves onto a newer release tag needs them from the remote.
+        print("{}: fetching tags for {}".format(dependency.name, dependency.ref),
+              flush=True)
+        run_command(
+            ["git", "-C", str(dependency.root), "fetch", "--tags", remote],
+            check=False,
+        )
+        commit = resolve_ref(dependency.root, dependency.ref, remote)
+    if not commit:
+        print(
+            "{}: {} is not fetched yet - run ./dev deps update".format(
+                dependency.name, dependency.ref
+            ),
+            file=sys.stderr,
+        )
+        return False
+
+    print("{} ref moved: {}".format(dependency.name, status.detail), flush=True)
+    checkout_dependency(dependency, dependency.ref, commit)
+    return True
+
+
+def update_dependency(dependency):
+    """Refresh from the remote and move onto whatever the ref resolves to now."""
+    root = dependency.root
+    if not root.is_dir():
+        clone_dependency(dependency)
+        return
+
+    status = dependency_status(dependency)
+    if status.state == "unpinned":
+        warn_unpinned([status])
+        print(
+            "{}: leaving the checkout alone".format(dependency.name), file=sys.stderr
+        )
+        return
+
+    print("Updating " + dependency.name, flush=True)
+    remote = manifest_remote(dependency, root)
+    run_command(["git", "-C", str(root), "fetch", "--prune", "--tags", remote])
+
+    commit = resolve_ref(root, dependency.ref, remote)
+    if not commit:
+        raise DevError(
+            "{}: {} is not in {}".format(
+                dependency.name, dependency.ref, dependency.git_url
+            )
+        )
+
+    pin = read_pin(dependency) or {}
+    if commit == pin.get("commit"):
+        print(
+            "{}: {} is unchanged ({})".format(
+                dependency.name, dependency.ref, short(commit)
+            )
+        )
+        if dependency_status(dependency).state == "unpatched":
+            apply_patches(dependency)
+            write_pin(dependency, dependency.ref, commit)
+        elif pin.get("ref") != dependency.ref:
+            write_pin(dependency, dependency.ref, commit)
+        return
+
+    print(
+        colorize(
+            "{}: {} moved {} -> {} - rebuild and retest, the API may have "
+            "changed".format(
+                dependency.name,
+                dependency.ref,
+                short(pin.get("commit", "?")),
+                short(commit),
+            ),
+            YELLOW,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    checkout_dependency(dependency, dependency.ref, commit)
+
+
+def resolve_dependency_checkouts():
+    """Bring stale pins forward and report what every checkout is sitting on."""
+    statuses = []
+    with dependency_lock():
+        for dependency in load_dependencies():
+            fetch_dependency(dependency)
+            statuses.append(dependency_status(dependency))
+
+    missing = [status for status in statuses if status.state == "missing"]
+    if missing:
+        raise DevError(
+            "Not checked out: {}. Run ./dev deps fetch.".format(
+                ", ".join(status.dependency.path for status in missing)
+            )
+        )
+
+    unpinned = [status for status in statuses if status.state != "pinned"]
+    if unpinned:
+        warn_unpinned(unpinned)
+    return statuses
+
+
+CHECKED_DEPENDENCIES = []
+
+
+def check_dependencies(strict=False):
+    """Verify (and refresh) dependency checkouts once per run."""
+    global CHECKED_DEPENDENCIES
+    if not CHECKED_DEPENDENCIES:
+        CHECKED_DEPENDENCIES = resolve_dependency_checkouts()
+
+    if strict:
+        unpinned = [s for s in CHECKED_DEPENDENCIES if s.state != "pinned"]
+        if unpinned:
+            raise DevError(
+                "A release build needs pinned dependencies: "
+                + "; ".join(describe(status) for status in unpinned)
+                + ". Run ./dev deps fetch --force, or pass --allow-unpinned."
+            )
+    return CHECKED_DEPENDENCIES
+
+
+ZIG_NAME = "zig"
+
+# The CPU of a Zig archive for each CPU name that the host can report. The
+# toolchain images run on the CPU of the host, thus the Linux build for that
+# CPU runs in each image, on Linux and on macOS. A desktop build runs the
+# build for the system of the host.
+ZIG_HOST_CPUS = {
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "aarch64": "aarch64",
+    "arm64": "aarch64",
+}
+ZIG_DEVICE_SYSTEM = "linux"
+# The archives that ./dev downloaded, kept for a fetch again and for the
+# checkouts that take this checkout as their origin.
+DOWNLOADS = "deps/downloads"
+ZIG_HOST_SYSTEM = "macos" if os.uname().sysname == "Darwin" else "linux"
+
+
+@dataclass(frozen=True)
+class Zig:
+    """The Zig release that compiles and links the C++ code.
+
+    The host fetches each archive once into a directory of its own under `path`.
+    Each toolchain image runs the Linux one from the mount of the project, and a
+    desktop build runs the one for the host. `marker` holds the sha256 of the
+    archive that the tree came from.
+    """
+
+    version: str
+    path: str
+    archive: str
+    url: str
+    sha256: str
+    minisign_key: str
+
+    @property
+    def root(self):
+        return ROOT / self.path / self.archive
+
+    @property
+    def marker(self):
+        return self.root / ".music-player-zig"
+
+def load_zig(system):
+    """Read the Zig pin for the CPU of the host and `system`, linux or macos."""
+    entry = read_deps_manifest().get(ZIG_NAME)
+    if not entry:
+        raise DevError("{} pins no {}".format(DEPS_MANIFEST.name, ZIG_NAME))
+
+    machine = os.uname().machine
+    cpu = ZIG_HOST_CPUS.get(machine.lower())
+    if not cpu:
+        raise DevError("No Zig build for a host CPU of " + machine)
+    archive = "{}-{}".format(cpu, system)
+    pinned = entry.get("archives", {}).get(archive)
+    if not pinned:
+        raise DevError(
+            "{}: {} pins no {} archive".format(DEPS_MANIFEST.name, ZIG_NAME, archive)
+        )
+    return Zig(
+        version      = entry["version"],
+        path         = entry["path"],
+        archive      = archive,
+        url          = pinned["url"],
+        sha256       = pinned["sha256"],
+        minisign_key = entry["minisign_key"],
+    )
+
+
+# A script beside `zig` that runs `zig c++`. An IDE that reads the compile
+# commands from a dry run of make knows a compiler by the name of the program
+# that runs, and it does not know `zig`.
+ZIG_CXX_NAME = "zig-c++"
+ZIG_CXX_SCRIPT = """#!/bin/sh
+exec "$(dirname "$0")/zig" c++ "$@"
+"""
+
+
+def write_zig_cxx(zig):
+    """Make the zig-c++ script exist beside `zig`."""
+    script = zig.root / ZIG_CXX_NAME
+    if not script.is_file() or script.read_text(encoding="utf-8") != ZIG_CXX_SCRIPT:
+        script.write_text(ZIG_CXX_SCRIPT, encoding="utf-8")
+    script.chmod(0o755)
+
+
+def zig_installed(zig):
+    if not (zig.root / "zig").is_file() or not zig.marker.is_file():
+        return False
+    return zig.marker.read_text(encoding="utf-8").strip() == zig.sha256
+
+
+def describe_zig(zig):
+    state = "pinned" if zig_installed(zig) else "missing"
+    return "{} at {}/ - {}, {}".format(
+        ZIG_NAME, zig.root.relative_to(ROOT), state, zig.version
+    )
+
+
+def download(url, target):
+    with urllib.request.urlopen(url, timeout=60) as response, target.open("wb") as out:
+        shutil.copyfileobj(response, out)
+
+
+def verify_zig_signature(zig, archive):
+    """Check the minisign signature of the archive, where minisign is installed.
+    The sha256 in the manifest is the check that always runs."""
+    if not shutil.which("minisign"):
+        print(
+            "minisign is not installed; the sha256 in {} is the only check".format(
+                DEPS_MANIFEST.name
+            ),
+            flush=True,
+        )
+        return
+    signature = archive.with_name(archive.name + ".minisig")
+    download(zig.url + ".minisig", signature)
+    result = run_command(
+        ["minisign", "-Vqm", str(archive), "-x", str(signature), "-P", zig.minisign_key],
+        capture=True,
+        check=False,
+    )
+    if result.returncode:
+        raise DevError(
+            "{}: the minisign signature does not match the key in {}".format(
+                archive.name, DEPS_MANIFEST.name
+            )
+        )
+
+
+def zig_systems():
+    """The Zig archives that this host uses: Linux for the toolchain images, and
+    the system of the host for a desktop build."""
+    return sorted({ZIG_DEVICE_SYSTEM, ZIG_HOST_SYSTEM})
+
+
+def url_file_name(url):
+    return PurePosixPath(urllib.parse.urlparse(url).path).name
+
+
+def kept_archive(checkout, name, sha256):
+    """The archive `name` that `checkout` keeps, when its sha256 agrees with the
+    pin. The other checks ran when the archive was downloaded."""
+    path = checkout / DOWNLOADS / name
+    if not path.is_file():
+        return None
+    if sha256_of(path) != sha256:
+        print("{}: the sha256 does not agree with {}".format(path, DEPS_MANIFEST.name),
+              flush=True)
+        return None
+    return path
+
+
+def download_archive(label, url, sha256, store, verify):
+    """Download and verify the archive at `url`, and keep it in `store`. `verify`
+    is None, or a function that raises DevError for an archive that it rejects."""
+    print("Downloading {} into {}".format(label, store), flush=True)
+    store.mkdir(parents=True, exist_ok=True)
+    name = url_file_name(url)
+    with tempfile.TemporaryDirectory(dir=store, prefix=".download-") as work:
+        archive = Path(work) / name
+        download(url, archive)
+        digest = sha256_of(archive)
+        if digest != sha256:
+            raise DevError(
+                "{}: sha256 is {}, {} pins {}".format(
+                    archive.name, digest, DEPS_MANIFEST.name, sha256
+                )
+            )
+        if verify:
+            verify(archive)
+        # A rename in one directory, thus a fetch at the same time never reads
+        # a part of the file.
+        kept = store / name
+        os.replace(archive, kept)
+    return kept
+
+
+def fetch_archive(label, url, sha256, verify=None):
+    """Returns the path of the pinned archive at `url`. It takes the archive that
+    this checkout or its origin keeps, and downloads it only when neither keeps
+    it."""
+    name = url_file_name(url)
+    origin = checkout_origin()
+    store = (origin or ROOT) / DOWNLOADS
+    with file_lock(store / ".lock", "downloads into " + str(store)):
+        for checkout in (ROOT, origin) if origin else (ROOT,):
+            archive = kept_archive(checkout, name, sha256)
+            if archive:
+                return archive
+        return download_archive(label, url, sha256, store, verify)
+
+
+def fetch_zig(system):
+    """Make the pinned Zig for `system` exist, without touching the network when
+    it already does or when this checkout or its origin keeps the archive.
+    Returns True when it unpacked an archive."""
+    zig = load_zig(system)
+    if zig_installed(zig):
+        write_zig_cxx(zig)
+        return False
+
+    # A tree of the layout with one archive directly in `path` is removed.
+    old_marker = ROOT / zig.path / zig.marker.name
+    if old_marker.is_file():
+        shutil.rmtree(ROOT / zig.path)
+
+    archive = fetch_archive(
+        "Zig {} ({})".format(zig.version, zig.archive),
+        zig.url,
+        zig.sha256,
+        lambda archive: verify_zig_signature(zig, archive),
+    )
+
+    print("Unpacking Zig {} ({}) from {} into {}".format(
+        zig.version, zig.archive, archive, zig.path), flush=True)
+    zig.root.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=zig.root.parent, prefix=".zig-") as work:
+        tree = Path(work) / "tree"
+        with tarfile.open(archive) as source:
+            if hasattr(tarfile, "data_filter"):
+                source.extractall(tree, filter="data")
+            else:
+                source.extractall(tree)
+        top = list(tree.iterdir())
+        if len(top) != 1 or not (top[0] / "zig").is_file():
+            raise DevError(archive.name + " does not hold one Zig tree")
+
+        if zig.root.exists():
+            shutil.rmtree(zig.root)
+        top[0].rename(zig.root)
+    write_zig_cxx(zig)
+    zig.marker.write_text(zig.sha256 + "\n", encoding="utf-8")
+    return True
+
+
+SQLITE_NAME = "sqlite"
+# The files of the amalgamation that the tests compile.
+SQLITE_FILES = ("sqlite3.c", "sqlite3.h")
+
+
+@dataclass(frozen=True)
+class Sqlite:
+    """The SQLite amalgamation that the host tests of the database code compile in
+    place of the library of the host, thus SQL that the devices do not have fails
+    on the host too. `marker` holds the sha256 of the archive that the tree came
+    from."""
+
+    version: str
+    path: str
+    url: str
+    sha256: str
+
+    @property
+    def root(self):
+        return ROOT / self.path
+
+    @property
+    def marker(self):
+        return self.root / ".music-player-sqlite"
+
+    @property
+    def lock(self):
+        # Outside the tree, because a fetch replaces the tree.
+        return self.root.parent / ".sqlite.lock"
+
+
+def load_sqlite():
+    entry = read_deps_manifest().get(SQLITE_NAME)
+    if not entry:
+        raise DevError("{} pins no {}".format(DEPS_MANIFEST.name, SQLITE_NAME))
+    return Sqlite(
+        version = entry["version"],
+        path    = entry["path"],
+        url     = entry["url"],
+        sha256  = entry["sha256"],
+    )
+
+
+def sqlite_installed(sqlite):
+    if not all((sqlite.root / name).is_file() for name in SQLITE_FILES):
+        return False
+    if not sqlite.marker.is_file():
+        return False
+    return sqlite.marker.read_text(encoding="utf-8").strip() == sqlite.sha256
+
+
+def describe_sqlite(sqlite):
+    state = "pinned" if sqlite_installed(sqlite) else "missing"
+    return "{} at {}/ - {}, {}".format(
+        SQLITE_NAME, sqlite.root.relative_to(ROOT), state, sqlite.version
+    )
+
+
+def fetch_sqlite():
+    """Make the pinned SQLite amalgamation exist, without touching the network
+    when it already does or when this checkout or its origin keeps the archive.
+    Returns True when it unpacked an archive."""
+    sqlite = load_sqlite()
+    if sqlite_installed(sqlite):
+        return False
+
+    with file_lock(sqlite.lock, "unpacks SQLite into " + str(sqlite.root)):
+        # Another ./dev can finish the tree while this one waits for the lock.
+        if sqlite_installed(sqlite):
+            return False
+        archive = fetch_archive("SQLite " + sqlite.version, sqlite.url, sqlite.sha256)
+
+        print("Unpacking SQLite {} from {} into {}".format(
+            sqlite.version, archive, sqlite.path), flush=True)
+        with tempfile.TemporaryDirectory(dir=sqlite.root.parent, prefix=".sqlite-") as work:
+            tree = Path(work) / "tree"
+            tree.mkdir()
+            with zipfile.ZipFile(archive) as source:
+                members = {PurePosixPath(name): name for name in source.namelist()}
+                for name in SQLITE_FILES:
+                    found = [path for path in members
+                             if len(path.parts) == 2 and path.name == name]
+                    if len(found) != 1:
+                        raise DevError(
+                            "{} does not hold one {} in one top directory".format(
+                                archive.name, name))
+                    with source.open(members[found[0]]) as data, \
+                            (tree / name).open("wb") as out:
+                        shutil.copyfileobj(data, out)
+            (tree / sqlite.marker.name).write_text(sqlite.sha256 + "\n", encoding="utf-8")
+
+            if sqlite.root.exists():
+                shutil.rmtree(sqlite.root)
+            tree.rename(sqlite.root)
+    return True
+
+
+def selected_dependencies(name):
+    """The git checkouts that a deps command names. Zig and SQLite are not
+    among them."""
+    if name in (ZIG_NAME, SQLITE_NAME):
+        return []
+    dependencies = load_dependencies()
+    if name in (None, "all"):
+        return dependencies
+    return [select_dependency(dependencies, name)]
+
+
+def zig_selected(name):
+    return name in (None, "all", ZIG_NAME)
+
+
+def sqlite_selected(name):
+    return name in (None, "all", SQLITE_NAME)
+
+
+def command_deps_list(args):
+    for dependency in selected_dependencies(args.dependency):
+        status = dependency_status(dependency)
+        print(
+            "{} at {}/ - {}, {}".format(
+                dependency.name, dependency.path, status.state, status.detail
+            )
+        )
+    if zig_selected(args.dependency):
+        for system in zig_systems():
+            print(describe_zig(load_zig(system)))
+    if sqlite_selected(args.dependency):
+        print(describe_sqlite(load_sqlite()))
+    return 0
+
+
+def command_deps_fetch(args):
+    global REQUESTED_ORIGIN
+    REQUESTED_ORIGIN = args.origin
+    if checkout_origin() is not None and not isolation_available():
+        warn_shared_desktop_state()
+    if zig_selected(args.dependency):
+        for system in zig_systems():
+            if not fetch_zig(system):
+                print(describe_zig(load_zig(system)))
+    if sqlite_selected(args.dependency):
+        if not fetch_sqlite():
+            print(describe_sqlite(load_sqlite()))
+    unpinned = []
+    with dependency_lock():
+        for dependency in selected_dependencies(args.dependency):
+            if args.force:
+                restore_dependency(dependency)
+                continue
+
+            if fetch_dependency(dependency):
+                continue
+
+            status = dependency_status(dependency)
+            if status.state == "pinned":
+                print(describe(status))
+            else:
+                unpinned.append(status)
+
+    if unpinned:
+        warn_unpinned(unpinned)
+        print(
+            "Leaving the checkout alone. Remove local changes and use --force to restore it.",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def confirm(question):
+    """Ask a yes/no question. False when there is nobody to ask."""
+    if not sys.stdin.isatty():
+        return False
+    try:
+        answer = input(question + " [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def restore_dependency(dependency):
+    """Put a user-managed checkout back on the manifest ref."""
+    if not dependency.root.is_dir():
+        clone_dependency(dependency)
+        return
+    if dependency.root.is_symlink():
+        print(
+            "{} is a symlink; restoring inside the linked tree".format(
+                dependency.path
+            ),
+            flush=True,
+        )
+    if is_patched(dependency, read_pin(dependency) or {}):
+        remove_patches(dependency)
+    changes = git(
+        dependency.root, "status", "--porcelain", "--untracked-files=no", check=False
+    )
+    if changes:
+        print("{} has local changes:".format(dependency.path))
+        print(changes)
+        if not confirm("Discard them?"):
+            raise DevError(
+                "{} has local changes - commit or discard them before --force".format(
+                    dependency.path
+                )
+            )
+        run_command(["git", "-C", str(dependency.root), "reset", "--hard", "--quiet"])
+
+    commit = resolve_ref(
+        dependency.root, dependency.ref, manifest_remote(dependency, dependency.root)
+    )
+    if not commit:
+        raise DevError(
+            "{}: {} is not fetched - run ./dev deps update".format(
+                dependency.name, dependency.ref
+            )
+        )
+    checkout_dependency(dependency, dependency.ref, commit)
+
+
+def command_deps_update(args):
+    # A Zig or SQLite pin names one archive, thus an update of it is a fetch.
+    if zig_selected(args.dependency):
+        for system in zig_systems():
+            fetch_zig(system)
+    if sqlite_selected(args.dependency):
+        fetch_sqlite()
+    with dependency_lock():
+        for dependency in selected_dependencies(args.dependency):
+            update_dependency(dependency)
+    return 0
+
+
+def command_deps(args):
+    if args.deps_handler is None:
+        args.command_parser.print_help()
+        return 0
+    return args.deps_handler(args)
+
+
+def adb(device, *args, check=True):
+    """Run ADB and return stdout as a list of lines.
+
+    ADB emits CRLF on some hosts; carriage returns are removed before splitting.
+    """
+    command = ["adb"]
+    if device is not None:
+        command.extend(["-s", device.serial])
+    command.extend(str(arg) for arg in args)
+    result = run_command(command, capture=True, check=check)
+    return result.stdout.decode(errors="replace").replace("\r", "").splitlines()
+
+
+def adb_shell(device, *args, check=True):
+    """Run one safely quoted device command and return normalized output lines."""
+    command = shlex.join(str(arg) for arg in args)
+    return adb(device, "shell", command, check=check)
+
+
+def list_devices(detect_platforms=True):
+    devices = []
+    for line in adb(None, "devices")[1:]:
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        serial, state = fields[:2]
+        device = Device(serial=serial, state=state)
+        if state == "device" and detect_platforms:
+            device = detect_device(device)
+        devices.append(device)
+    return devices
+
+
+def detect_device(device):
+    cpuinfo = "\n".join(adb_shell(device, "cat", "/proc/cpuinfo", check=False))
+    platform = "unknown"
+    hardware = "-"
+    for identifier, candidate in CPUINFO_PLATFORMS.items():
+        if identifier in cpuinfo:
+            platform = candidate
+            hardware = identifier
+            break
+
+    if platform == "unknown":
+        # Match the platform check in the NextUI updater.
+        model = "\n".join(adb_shell(
+            device, "cat", "/proc/device-tree/model", check=False
+        ))
+        if "sun50iw9" in model:
+            platform = "h700"
+            hardware = model.replace("\0", "").strip()
+
+    return Device(
+        serial=device.serial,
+        state=device.state,
+        platform=platform,
+        hardware=hardware,
+    )
+
+
+def normalize_alias(value):
+    return re.sub(r"[\s_-]+", "", value).lower()
+
+
+def platform_for_alias(value):
+    key = normalize_alias(value)
+    for platform, aliases in ALIASES.items():
+        if any(key == normalize_alias(alias) for alias in aliases):
+            return platform
+    return None
+
+
+def unique(values):
+    return list(dict.fromkeys(values))
+
+
+def resolve_build_platforms(values, default=("desktop",), allow_all=True):
+    values = values or list(default)
+    platforms = []
+    for value in values:
+        key = normalize_alias(value)
+        if key == "all":
+            if not allow_all:
+                raise DevError("'all' is not valid for this command")
+            platforms.extend(ALL_PLATFORMS)
+            continue
+        platform = platform_for_alias(key)
+        if not platform:
+            raise DevError("Unknown platform: " + value)
+        platforms.append(platform)
+    return unique(platforms)
+
+
+def resolve_dist_platforms(values):
+    values = values or ["all"]
+    platforms = []
+    for value in values:
+        key = normalize_alias(value)
+        if key == "all":
+            platforms.extend(DEVICE_PLATFORMS)
+            continue
+        platform = platform_for_alias(key)
+        if platform not in DEVICE_PLATFORMS:
+            raise DevError("Invalid distribution platform: " + value)
+        platforms.append(platform)
+    return unique(platforms)
+
+
+def resolve_device_targets(values, devices, allow_desktop):
+    ready = [device for device in devices if device.state == "device"]
+    by_serial = {device.serial: device for device in devices}
+    build_platforms = []
+    targets = []
+
+    for value in values:
+        key = normalize_alias(value)
+        if key == "device":
+            selected = [device for device in ready if device.platform in DEVICE_PLATFORMS]
+            if not selected:
+                raise DevError("No supported ADB devices are connected")
+            targets.extend(selected)
+            build_platforms.extend(device.platform for device in selected)
+            continue
+
+        platform = platform_for_alias(key)
+        if platform:
+            if platform == "desktop":
+                if not allow_desktop:
+                    raise DevError("desktop is not valid for this command")
+                build_platforms.append(platform)
+                continue
+            selected = [device for device in ready if device.platform == platform]
+            if not selected:
+                raise DevError("No connected device matches " + platform)
+            targets.extend(selected)
+            build_platforms.append(platform)
+            continue
+
+        device = by_serial.get(value)
+        if not device:
+            raise DevError("Unknown platform, alias, or ADB serial: " + value)
+        if device.state != "device":
+            raise DevError("ADB device {} is {}".format(value, device.state))
+        if device.platform not in DEVICE_PLATFORMS:
+            raise DevError("Could not detect the platform for ADB device " + value)
+        targets.append(device)
+        build_platforms.append(device.platform)
+
+    targets = list({device.serial: device for device in targets}.values())
+    return unique(build_platforms), targets
+
+
+def external_git_dirs(checkouts):
+    """The git common directory of each checkout that is a worktree and that has
+    the directory outside of itself."""
+    found = []
+    for checkout in checkouts:
+        common = git(checkout, "rev-parse", "--path-format=absolute", "--git-common-dir",
+                     check=False)
+        if not common:
+            continue
+        common = Path(common)
+        if common == checkout / ".git" or common in found:
+            continue
+        found.append(common)
+    return found
+
+
+def run_container(runtime, platform, command, check=True):
+    container_command = [runtime, "run"]
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        container_command.append("-it")
+    container_command.extend(["-v", "{}:{}".format(ROOT, CONTAINER_PROJECT)])
+    checkouts = [ROOT]
+    for dependency in load_dependencies():
+        if not dependency.root.is_dir():
+            raise DevError(
+                "{} is not checked out. Run ./dev deps fetch.".format(dependency.path)
+            )
+        container_command.extend(
+            [
+                "-v",
+                "{}:{}/{}".format(
+                    dependency.root.resolve(), CONTAINER_PROJECT, dependency.path
+                ),
+            ]
+        )
+        checkouts.append(dependency.root.resolve())
+    for common in external_git_dirs(checkouts):
+        # The .git file of a worktree holds the absolute path of this directory.
+        container_command.extend(["-v", "{}:{}:ro".format(common, common)])
+    container_command.extend(
+        [
+            "-w",
+            CONTAINER_PROJECT,
+            "--rm",
+            "ghcr.io/loveretro/{}-toolchain".format(platform),
+        ]
+    )
+    container_command.extend(command)
+    return run_command(container_command, check=check)
+
+
+def sha256_of(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def extract_pak_libraries(platform, runtime, build_dir):
+    """Copy each library of the pak out of its toolchain image.
+
+    Runs on every build, thus a newer image gives a newer library with no
+    cache to clear. Prints the SHA-256 of each copy, thus the build log shows
+    when an image update changed one.
+    """
+    libraries = PAK_LIBRARIES.get(platform, ())
+    if not libraries:
+        return
+    target_dir = ROOT / "bin" / platform
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    by_image = {}
+    for library in libraries:
+        by_image.setdefault(library.image, []).append(library)
+    for image, image_libraries in by_image.items():
+        steps = []
+        for library in image_libraries:
+            target = shlex.quote(
+                "{}/bin/{}/{}".format(CONTAINER_PROJECT, platform, library.name)
+            )
+            steps.append("cp -L {} {}".format(shlex.quote(library.source), target))
+            # The loader needs .dynsym only; .symtab and .debug_* are dead weight
+            # in the pak.
+            steps.append("aarch64-nextui-linux-gnu-strip " + target)
+        run_container(runtime, image, ["sh", "-c", " && ".join(steps)])
+
+    for library in libraries:
+        copied = target_dir / library.name
+        if not copied.is_file():
+            raise DevError("{} did not come out of the {} image".format(
+                copied.relative_to(ROOT), library.image))
+        print("Extracted {} sha256 {}".format(copied.relative_to(ROOT), sha256_of(copied)))
+
+        if not library.link:
+            continue
+        # The linker wants the bare .so name; the loader wants the SONAME.
+        staged = build_dir / library.name
+        shutil.copy2(copied, staged)
+        link = build_dir / (library.name.split(".so")[0] + ".so")
+        link.unlink(missing_ok=True)
+        link.symlink_to(library.name)
+
+
+# Prints the glibc version of the sysroot of the toolchain image, for example
+# "2.28". The C++ code links against it.
+GLIBC_VERSION_QUERY = (
+    "printf '#include <features.h>\\n__GLIBC__.__GLIBC_MINOR__\\n'"
+    " | aarch64-nextui-linux-gnu-gcc -E -P -x c - | tail -n 1 | tr -d ' '"
+)
+
+
+def build_device(platform, runtime, kind):
+    build_dir = ROOT / "src" / "build" / kind / platform
+    build_dir.mkdir(parents=True, exist_ok=True)
+    extract_pak_libraries(platform, runtime, build_dir)
+
+    nextui = nextui_dependency(platform)
+    run_container(
+        runtime,
+        platform,
+        [
+            "make",
+            "-C",
+            "{}/{}/workspace/{}/libmsettings".format(
+                CONTAINER_PROJECT, nextui.path, platform
+            ),
+            "build",
+            "CROSS_COMPILE=aarch64-nextui-linux-gnu-",
+            "PREFIX=/opt/nextui",
+            "PREFIX_LOCAL=/opt/nextui",
+        ],
+    )
+    make = shlex.join(
+        [
+            "make",
+            "-C",
+            CONTAINER_PROJECT + "/src",
+            "PLATFORM={}".format(platform),
+            "KIND=" + kind,
+            "NEXTUI_ROOT=" + nextui.make_root,
+        ]
+    )
+    run_container(
+        runtime,
+        platform,
+        ["sh", "-c", '{} GLIBC_VERSION="$({})"'.format(make, GLIBC_VERSION_QUERY)],
+    )
+
+
+def desktop_setup_stale(dependency, marker):
+    """True when the NextUI base build predates the current checkout."""
+    if not marker.exists():
+        return True
+    stamp = dependency_stamp(dependency)
+    return bool(stamp) and stamp.stat().st_mtime > marker.stat().st_mtime
+
+
+def build_desktop(kind):
+    nextui = nextui_dependency()
+    nextui_root = nextui.root.resolve()
+    desktop_root = nextui_root / "workspace" / "desktop"
+    prefix_local = DESKTOP_PREFIX
+    setup_marker = prefix_local / ".desktop_setup_ok"
+    system = os.uname().sysname
+
+    env = os.environ.copy()
+    if system == "Linux":
+        env["CROSS_COMPILE"] = "/usr/bin/"
+        env["PREFIX"] = "/usr"
+    elif system == "Darwin":
+        env["CROSS_COMPILE"] = "/usr/local/bin/"
+        env["PREFIX"] = "/opt/homebrew"
+        # Flags that a shell profile exports for another toolchain (stale Intel
+        # /usr/local paths) leak through make into the cmake compiler test of
+        # libchdr, which then links -lchdr before it exists.
+        for key in ("LDFLAGS", "CPPFLAGS", "CFLAGS", "CXXFLAGS", "LIBRARY_PATH"):
+            env.pop(key, None)
+        env["PKG_CONFIG_PATH"] = "/opt/homebrew/lib/pkgconfig:/opt/homebrew/share/pkgconfig"
+    else:
+        raise DevError("Unsupported host OS: " + system)
+    env["PREFIX_LOCAL"] = str(prefix_local)
+    env["UNION_PLATFORM"] = "desktop"
+    # A make that runs ./dev gives its flags to the make of the app only. Thus a
+    # dry run, as an IDE starts it to read the compile commands, still prepares
+    # the NextUI tree and still prints the commands of the app.
+    setup_env = {key: value for key, value in env.items()
+                 if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")}
+
+    # Each checkout writes the shared prefix and reads it to compile and link,
+    # thus one desktop build at a time runs this part.
+    with file_lock(prefix_local / ".lock", "builds for the desktop"):
+        if desktop_setup_stale(nextui, setup_marker):
+            print("Preparing NextUI desktop workspace...", flush=True)
+            if system == "Darwin" and not os.access("/usr/local/bin/gcc", os.X_OK):
+                run_command(
+                    ["sudo", str(desktop_root / "macos_create_gcc_symlinks.sh")],
+                    env=setup_env,
+                )
+            run_command([str(desktop_root / "prepare_fake_sd_root.sh")], env=setup_env)
+            run_command(
+                ["make", "-C", str(nextui_root), "build", "PLATFORM=desktop"],
+                env=setup_env,
+            )
+            prefix_local.mkdir(parents=True, exist_ok=True)
+            setup_marker.touch()
+            print("Desktop workspace setup complete.")
+
+        installed_header = prefix_local / "include/msettings.h"
+        previous_header = installed_header.read_bytes() if installed_header.exists() else None
+        previous_stat = installed_header.stat() if previous_header is not None else None
+        run_command(["make", "-C", str(desktop_root / "libmsettings"), "build"], env=setup_env)
+        if previous_header is not None and installed_header.read_bytes() == previous_header:
+            os.utime(installed_header, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+        run_command(
+            [
+                "make",
+                "-C",
+                str(ROOT / "src"),
+                "PLATFORM=desktop",
+                "KIND=" + kind,
+                "NEXTUI_ROOT=" + nextui.make_root,
+            ],
+            env=env,
+        )
+
+
+VERSION_NUMBER = r"(0|[1-9][0-9]*)"
+VERSION_CORE = r"v" + r"\.".join([VERSION_NUMBER] * 3)
+STABLE_VERSION = re.compile(VERSION_CORE + r"\Z", re.ASCII)
+OFFICIAL_VERSION = re.compile(VERSION_CORE + r"(-[a-z]+\." + VERSION_NUMBER + r")?\Z", re.ASCII)
+BUILD_VERSION = re.compile(VERSION_CORE + r"(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
+                           r"(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?\Z", re.ASCII)
+VERSION_FORM = "vMAJOR.MINOR.PATCH[-pre-release][+build], no leading zeros, at most 31 characters"
+# A derived version adds "+" and a build identifier of up to seven characters to a release tag.
+RELEASE_TAG_MAX = 23
+
+
+def checked_version(value):
+    valid = isinstance(value, str) and len(value) <= 31 and BUILD_VERSION.fullmatch(value)
+    if valid and "-" in value.split("+", 1)[0]:
+        identifiers = value.split("+", 1)[0].split("-", 1)[1].split(".")
+        valid = all(not (item.isdigit() and len(item) > 1 and item[0] == "0")
+                    for item in identifiers)
+    if not valid:
+        raise DevError("Invalid version {!r}. Expected {}.".format(value, VERSION_FORM))
+    return value
+
+
+def official_version_order(value):
+    core, separator, prerelease = value[1:].partition("-")
+    numbers = tuple((len(part), part) for part in core.split("."))
+    if not separator:
+        return numbers, 1, ()
+    label, number = prerelease.split(".")
+    return numbers, 0, (label, len(number), number)
+
+
+def app_version(requested, identifier="local"):
+    if requested != "auto":
+        return checked_version(requested)
+    tags = []
+    try:
+        checkout = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
+                                  capture_output=True, text=True)
+        if checkout.returncode == 0 and Path(checkout.stdout.strip()).resolve() == ROOT:
+            result = subprocess.run(["git", "-C", str(ROOT), "tag", "--merged", "HEAD"],
+                                    capture_output=True, text=True)
+            if result.returncode == 0:
+                tags = [tag for tag in result.stdout.splitlines()
+                        if OFFICIAL_VERSION.fullmatch(tag)]
+    except FileNotFoundError:
+        pass
+    if tags:
+        base = max(tags, key=official_version_order)
+    else:
+        base = load_pak().get("version")
+        if not isinstance(base, str) or not STABLE_VERSION.fullmatch(base):
+            raise DevError("pak.json must give a stable version, got {!r}.".format(base))
+    return checked_version(base + "+" + identifier)
+
+
+def write_app_version(platform, kind, version):
+    path = ROOT / "src" / "build" / kind / platform / "version_string.c"
+    content = '#include "version.h"\n\nconst char APP_VERSION[] = "' + version + '";\n'
+    if not path.exists() or path.read_text() != content:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+
+def build_platforms(platforms, runtime="docker", kind="debug", requested_version="auto"):
+    version = app_version(requested_version)
+    check_dependencies()
+    if any(platform != "desktop" for platform in platforms):
+        fetch_zig(ZIG_DEVICE_SYSTEM)
+    if "desktop" in platforms:
+        fetch_zig(ZIG_HOST_SYSTEM)
+    for platform in platforms:
+        print("== Building {} ({}) ==".format(platform, kind), flush=True)
+        write_app_version(platform, kind, version)
+        if platform == "desktop":
+            build_desktop(kind)
+        else:
+            build_device(platform, runtime, kind)
+
+
+def parse_manifest(platforms):
+    entries = []
+    directories = []
+    missing = []
+    for line_number, raw_line in enumerate(MANIFEST.read_text().splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        condition = None
+        match = re.match(r"^\[([^]]+)\]\s+(.+)$", line)
+        if match:
+            condition, line = match.groups()
+            if condition not in platforms:
+                continue
+
+        patterns = []
+        if "{platform}" in line:
+            patterns.extend(line.replace("{platform}", platform) for platform in platforms)
+        else:
+            patterns.append(line)
+
+        for pattern in patterns:
+            if pattern.endswith("/"):
+                directory = ROOT / pattern
+                try:
+                    directory.resolve().relative_to(ROOT)
+                except ValueError:
+                    raise DevError("Manifest entry escapes the repository: " + pattern)
+                directories.append(directory.relative_to(ROOT))
+                continue
+            absolute_pattern = str(ROOT / pattern)
+            matches = sorted(Path(path) for path in glob.glob(absolute_pattern, recursive=True))
+            matches = [path for path in matches if path.is_file() or path.is_symlink()]
+            if not matches:
+                missing.append("{}:{}: {}".format(MANIFEST.name, line_number, pattern))
+                continue
+            for path in matches:
+                resolved = path.resolve()
+                try:
+                    resolved.relative_to(ROOT)
+                except ValueError:
+                    raise DevError("Manifest entry escapes the repository: " + str(path))
+                entries.append(path.relative_to(ROOT))
+    return unique(entries), unique(directories), missing
+
+
+def stage_package(platforms, destination, strict):
+    """Copy the files that the manifest gives for `platforms` into `destination`.
+    Returns `destination`."""
+    platforms = tuple(unique(platforms))
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    entries, directories, missing = parse_manifest(platforms)
+    if missing:
+        message = "Manifest patterns with no matches:\n  " + "\n  ".join(missing)
+        if strict:
+            raise DevError(message)
+        print("WARNING: " + message, file=sys.stderr)
+
+    for relative in directories:
+        (destination / relative).mkdir(parents=True, exist_ok=True)
+
+    for relative in entries:
+        source = ROOT / relative
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target, follow_symlinks=True)
+
+    if strict:
+        actual = {
+            path.relative_to(destination)
+            for path in destination.rglob("*")
+            if path.is_file() or path.is_symlink()
+        }
+        actual.update(relative for relative in directories if (destination / relative).is_dir())
+        expected = set(entries) | set(directories)
+        extra = sorted(actual - expected)
+        absent = sorted(expected - actual)
+        if extra or absent:
+            lines = []
+            if extra:
+                lines.append("Unexpected files:\n  " + "\n  ".join(map(str, extra)))
+            if absent:
+                lines.append("Missing files:\n  " + "\n  ".join(map(str, absent)))
+            raise DevError("\n".join(lines))
+
+    return destination
+
+
+def create_zip(source_dir, archive_path):
+    """Pack `source_dir` into `archive_path`, with paths relative to `source_dir`.
+    Returns `archive_path`."""
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    if archive_path.exists():
+        archive_path.unlink()
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(source_dir.rglob("*")):
+            if path.is_file() or (path.is_dir() and not any(path.iterdir())):
+                archive.write(path, path.relative_to(source_dir))
+    return archive_path
+
+
+def extract_package(archive, destination):
+    destination.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as bundle:
+        for info in bundle.infolist():
+            extracted = Path(bundle.extract(info, destination))
+            mode = (info.external_attr >> 16) & 0o7777
+            if mode:
+                extracted.chmod(mode)
+    return destination
+
+
+def remote_pak_path(platform):
+    return "{}/{}/{}".format(REMOTE_ROOT, platform, PAK_NAME)
+
+
+@dataclass(frozen=True)
+class DevicePaths:
+    """The paths of the app on one device."""
+
+    pakdir: str
+    userdata: str
+    db: str
+    log: str
+
+
+# The words that a device command changes to a path of DevicePaths.
+PATH_WORDS = {
+    "pakdir": "pakdir",
+    "userdata": "userdata",
+    "db": "db",
+    "log": "log",
+}
+
+
+def device_paths(device):
+    return DevicePaths(
+        pakdir   = remote_pak_path(device.platform),
+        userdata = REMOTE_USERDATA,
+        db       = REMOTE_USERDATA + "/music-player.db",
+        log      = "/mnt/SDCARD/.userdata/{}/logs/music-player.txt".format(
+            device.platform
+        ),
+    )
+
+
+def expand_path_word(paths, word):
+    """Returns the device path of a path word, or the word when it is not one."""
+    field = PATH_WORDS.get(word)
+    return getattr(paths, field) if field else word
+
+
+def get_pids(device, process):
+    lines = adb_shell(device, "pidof", process, check=False)
+    pids = " ".join(lines).split()
+    return [pid for pid in pids if pid.isdigit()]
+
+
+def stop_player(device, restart):
+    pids = get_pids(device, "musicplayer.elf")
+    if not pids:
+        return False
+    if restart:
+        print("Restarting Music Player on {}".format(device.serial), flush=True)
+        adb_shell(device, "touch", RESTART_FLAG)
+    adb_shell(device, "kill", "-KILL", *pids)
+    return True
+
+
+def wait_for_nextui(device, timeout=8.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pids = get_pids(device, "nextui.elf")
+        if pids:
+            return pids
+        time.sleep(0.25)
+    return []
+
+
+def launch_from_nextui(device):
+    pids = wait_for_nextui(device)
+    if not pids:
+        raise DevError(
+            "nextui.elf is not running on {}. Launch Music Player manually.".format(
+                device.serial
+            )
+        )
+    launch_command = "'{}/launch.sh'".format(remote_pak_path(device.platform))
+    with tempfile.TemporaryDirectory(prefix="music-player-next-") as temp_dir:
+        next_file = Path(temp_dir) / "next"
+        next_file.write_bytes(launch_command.encode("utf-8"))
+        adb(device, "push", str(next_file), "/tmp/next")
+    adb_shell(device, "kill", "-KILL", *pids)
+
+
+def install_binary(device):
+    source = ROOT / "bin" / device.platform / "musicplayer.elf"
+    destination_dir = remote_pak_path(device.platform) + "/bin/" + device.platform
+    adb_shell(device, "mkdir", "-p", destination_dir)
+    print(
+        "Uploading binary to {}:{}/musicplayer.elf".format(
+            device.serial, destination_dir
+        ),
+        flush=True,
+    )
+    adb(device, "push", str(source), destination_dir + "/musicplayer.elf")
+
+
+def delete_userdata(device):
+    stop_player(device, restart=False)
+    print(
+        "Removing app data from {}:{}".format(device.serial, REMOTE_USERDATA),
+        flush=True,
+    )
+    adb_shell(device, "rm", "-rf", REMOTE_USERDATA)
+
+
+def install_full(device, package, delete):
+    if delete:
+        stop_player(device, restart=False)
+        adb_shell(device, "rm", "-rf", remote_pak_path(device.platform))
+    adb_shell(
+        device, "mkdir", "-p", "{}/{}".format(REMOTE_ROOT, device.platform)
+    )
+    print(
+        "Uploading full pak to {}:{}/{}/".format(
+            device.serial, REMOTE_ROOT, device.platform
+        ),
+        flush=True,
+    )
+    adb(
+        device,
+        "push",
+        str(package),
+        "{}/{}/".format(REMOTE_ROOT, device.platform),
+    )
+
+
+def run_on_device(device):
+    if stop_player(device, restart=True):
+        return
+    launch_from_nextui(device)
+
+
+def isolation_available():
+    return shutil.which("bwrap") is not None
+
+
+def warn_shared_desktop_state():
+    warn(
+        "bwrap is not installed, thus a desktop run uses the shared sdcard {} and the "
+        "shared /tmp. Runs of different checkouts are not independent, and two desktop "
+        "runs at one time, headless too, are not safe.".format(DESKTOP_SDCARD)
+    )
+
+
+def in_tmp(path):
+    return path == Path("/tmp") or Path("/tmp") in path.parents
+
+
+def test_control_paths(app_args):
+    """The file paths in each --test-control argument of the app."""
+    values = []
+    for index, arg in enumerate(app_args):
+        if arg == "--test-control" and index + 1 < len(app_args):
+            values.append(app_args[index + 1])
+        elif arg.startswith("--test-control="):
+            values.append(arg.split("=", 1)[1])
+    paths = []
+    for value in values:
+        for side in value.split(","):
+            if side and side != "std" and not side.startswith("fd:"):
+                paths.append(Path(side))
+    return paths
+
+
+def check_desktop_isolation(sdcard, template, app_args):
+    """Stop before the build when the options of an isolated run cannot work."""
+    if template is not None and sdcard is None:
+        raise DevError("--sdcard-template requires --sdcard")
+    if sdcard is None or not isolation_available():
+        # The run uses the shared sdcard, and ignores the template.
+        return
+    if template is None:
+        pass
+    elif not template.is_dir():
+        raise DevError("No such template directory: " + str(template))
+    else:
+        shared = [name for name in SHARED_SDCARD_DIRS if (template / name).exists()]
+        if shared:
+            raise DevError(
+                "{} holds {}, which an isolated run takes from the shared sdcard".format(
+                    template, ", ".join(shared)
+                )
+            )
+    for path in test_control_paths(app_args):
+        # The app runs in ROOT, thus a relative path starts there.
+        resolved = (ROOT / path).resolve()
+        inside_root = resolved == ROOT or ROOT in resolved.parents
+        if in_tmp(resolved) and not inside_root:
+            raise DevError(
+                "{}: an isolated run has a private /tmp, thus the control channel "
+                "must be outside /tmp".format(path)
+            )
+
+
+def seed_sdcard(sdcard, template):
+    """Copy `template` into `sdcard` when `sdcard` is missing or empty. The copy
+    goes to a staging directory first, thus a copy that stops half-way leaves no
+    directory that a later run takes as seeded."""
+    staging = sdcard.with_name(sdcard.name + ".seeding")
+    if staging.exists():
+        shutil.rmtree(staging)
+    if sdcard.is_dir() and any(sdcard.iterdir()):
+        print("{} holds files; keeping them and copying no template".format(sdcard))
+        return
+    print("Seeding {} from {}".format(sdcard, template), flush=True)
+    try:
+        shutil.copytree(template, staging, symlinks=True)
+    except (shutil.Error, OSError) as error:
+        raise DevError("cannot copy {}: {}".format(template, error))
+    if sdcard.exists():
+        sdcard.rmdir()
+    staging.rename(sdcard)
+
+
+def isolated_command(sdcard, args):
+    """`args` in a mount namespace where `sdcard` replaces the shared sdcard,
+    the shared directories are read-only, and /tmp is private."""
+    for name in ("Music", "Tools"):
+        (DESKTOP_SDCARD / name).mkdir(parents=True, exist_ok=True)
+    command = [
+        "bwrap",
+        "--dev-bind", "/", "/",
+        "--bind", str(sdcard), str(DESKTOP_SDCARD),
+    ]
+    for name in SHARED_SDCARD_DIRS:
+        # bwrap finds the source of a bind in the root of the host, thus the
+        # bind of `sdcard` above does not hide it.
+        command += ["--ro-bind", str(DESKTOP_SDCARD / name), str(DESKTOP_SDCARD / name)]
+    command += ["--tmpfs", "/tmp"]
+    if in_tmp(ROOT):
+        # The private /tmp hides a checkout under /tmp, and the app with it.
+        command += ["--bind", str(ROOT), str(ROOT)]
+    if Path("/tmp/.X11-unix").is_dir():
+        command += ["--bind", "/tmp/.X11-unix", "/tmp/.X11-unix"]
+    command += ["--die-with-parent", "--"]
+    return command + args
+
+
+def run_desktop(extra_args=None, headless=False, sdcard=None, template=None):
+    prefix = str(DESKTOP_PREFIX)
+    env = os.environ.copy()
+    changed = {}
+    for name in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        current = env.get(name, "")
+        env[name] = prefix + "/lib" + ((":" + current) if current else "")
+        changed[name] = env[name]
+    if headless:
+        # The offscreen driver of SDL draws with no window, thus the app takes
+        # no focus. The dummy driver stops the app, thus do not use it.
+        env["SDL_VIDEODRIVER"] = "offscreen"
+        changed["SDL_VIDEODRIVER"] = env["SDL_VIDEODRIVER"]
+    if sdcard is not None and not isolation_available():
+        warn_shared_desktop_state()
+        sdcard = None
+    data_root = DESKTOP_SDCARD
+    if sdcard is not None:
+        data_root = sdcard.resolve()
+        if template is not None:
+            seed_sdcard(data_root, template.resolve())
+    (data_root / ".userdata/shared").mkdir(parents=True, exist_ok=True)
+    (data_root / ".userdata/desktop").mkdir(parents=True, exist_ok=True)
+
+    args = [str(ROOT / "bin/desktop/musicplayer.elf")] + list(extra_args or [])
+    if sdcard is not None:
+        args = isolated_command(data_root, args)
+    # Print the command so it can be repeated by hand, with the options of the
+    # app and a debugger.
+    assignments = " ".join(
+        "{}={}".format(name, shlex.quote(value)) for name, value in changed.items()
+    )
+    print(assignments + " " + shlex.join(args), flush=True)
+    return run_command(args, env=env).returncode
+
+
+def clean_local():
+    paths = [ROOT / "src/build", ROOT / "src/opus_obj", ROOT / "test/bin", DIST_DIR]
+    files = [
+        ROOT / "bin/tg5040/musicplayer.elf",
+        ROOT / "bin/tg5050/musicplayer.elf",
+        ROOT / "bin/my355/musicplayer.elf",
+        ROOT / "bin/h700/musicplayer.elf",
+        ROOT / "bin/desktop/musicplayer.elf",
+        ROOT / "Music.Player.pak.zip",
+    ]
+    for path in paths:
+        if path.exists():
+            print("Removing " + str(path.relative_to(ROOT)))
+            shutil.rmtree(path)
+    for path in files:
+        if path.exists():
+            print("Removing " + str(path.relative_to(ROOT)))
+            path.unlink()
+
+
+def worktree_git_dir(root):
+    """The git directory that the .git file of a worktree at `root` names, or
+    None when `root` is not a worktree."""
+    marker = root / ".git"
+    if not marker.is_file():
+        return None
+    text = marker.read_text(encoding="utf-8", errors="replace").strip()
+    if not text.startswith("gitdir:"):
+        return None
+    return Path(text[len("gitdir:"):].strip())
+
+
+def other_worktrees(root):
+    """The paths of the worktrees of the clone at `root`, other than `root`."""
+    listing = git(root, "worktree", "list", "--porcelain", check=False)
+    paths = [Path(line[len("worktree "):]) for line in listing.splitlines()
+             if line.startswith("worktree ")]
+    return [path for path in paths if path.resolve() != root.resolve()]
+
+
+def clean_dependencies():
+    for dependency in load_dependencies():
+        root = dependency.root
+        git_dir = worktree_git_dir(root) if root.is_dir() else None
+        if root.is_symlink():
+            print("Unlinking " + dependency.path)
+            root.unlink()
+        elif git_dir is not None and git_dir.is_dir():
+            # git removes the worktree and its entry in the clone of the origin.
+            print("Removing the worktree " + dependency.path)
+            common = git(root, "rev-parse", "--path-format=absolute",
+                         "--git-common-dir")
+            run_command(["git", "--git-dir", common, "worktree", "remove", "--force",
+                         str(root)])
+        elif git_dir is not None:
+            print("Removing {}, a worktree whose origin is gone".format(dependency.path))
+            shutil.rmtree(root)
+        elif root.is_dir():
+            worktrees = other_worktrees(root)
+            if worktrees:
+                warn("{} has worktrees in other checkouts, thus it stays: {}".format(
+                    dependency.path, ", ".join(str(path) for path in worktrees)))
+                continue
+            print("Removing " + dependency.path)
+            shutil.rmtree(root)
+
+
+def fetch_legacy_icy(url, size):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "http":
+        raise ValueError("legacy ICY fallback only supports HTTP")
+
+    port = parsed.port or 80
+    path = parsed.path or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+
+    with socket.create_connection(
+        (parsed.hostname, port), timeout=RADIO_TIMEOUT_SECONDS
+    ) as stream:
+        request = (
+            "GET {} HTTP/1.0\r\n"
+            "Host: {}\r\n"
+            "User-Agent: NextUI stream check\r\n"
+            "Icy-MetaData: 0\r\n"
+            "Connection: close\r\n\r\n"
+        ).format(path, parsed.netloc)
+        stream.sendall(request.encode("ascii"))
+        response = bytearray()
+        while b"\r\n\r\n" not in response and len(response) < 16 * 1024:
+            response.extend(stream.recv(4096))
+
+        headers, separator, body = response.partition(b"\r\n\r\n")
+        if not separator or not headers.startswith(b"ICY 200"):
+            raise ValueError("invalid ICY response")
+        while len(body) < size:
+            chunk = stream.recv(min(4096, size - len(body)))
+            if not chunk:
+                break
+            body += chunk
+        return bytes(body), url
+
+
+def fetch_radio_url(url, size=RADIO_SAMPLE_SIZE):
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "NextUI stream check"},
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=RADIO_TIMEOUT_SECONDS
+        ) as response:
+            return response.read(size), response.geturl()
+    except http.client.BadStatusLine as error:
+        if str(error).startswith("ICY 200"):
+            return fetch_legacy_icy(url, size)
+        raise
+
+
+def find_mp3_frame(data):
+    for index in range(len(data) - 3):
+        first, second, third = data[index : index + 3]
+        if first != 0xFF or second & 0xE0 != 0xE0:
+            continue
+        if second & 0x18 == 0x08 or second & 0x06 == 0:
+            continue
+        if third & 0xF0 in (0, 0xF0) or third & 0x0C == 0x0C:
+            continue
+        return index
+    return None
+
+
+def find_aac_frame(data):
+    for index in range(len(data) - 6):
+        first, second = data[index : index + 2]
+        if first != 0xFF or second & 0xF6 != 0xF0:
+            continue
+        if data[index + 2] & 0x3C == 0x3C:
+            continue
+        frame_length = ((data[index + 3] & 0x03) << 11) | (data[index + 4] << 3)
+        frame_length |= data[index + 5] >> 5
+        if frame_length >= 7:
+            return index
+    return None
+
+
+def first_radio_media_url(manifest, base_url):
+    for line in manifest.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return urllib.parse.urljoin(base_url, line)
+    raise ValueError("HLS manifest contains no media URL")
+
+
+def sample_radio_stream(url):
+    data, final_url = fetch_radio_url(url)
+    if data.lstrip().startswith(b"#EXTM3U"):
+        media_url = first_radio_media_url(data, final_url)
+        data, media_url = fetch_radio_url(media_url)
+        if data.lstrip().startswith(b"#EXTM3U"):
+            segment_url = first_radio_media_url(data, media_url)
+            data, _final_url = fetch_radio_url(segment_url)
+    return data
+
+
+def detect_radio_format(data):
+    ogg_offset = data.find(b"OggS")
+    opus_offset = data.find(b"OpusHead")
+    vorbis_offset = data.find(b"\x01vorbis")
+    if ogg_offset >= 0 and opus_offset >= ogg_offset:
+        return "OPUS"
+    if ogg_offset >= 0 and vorbis_offset >= ogg_offset:
+        return "OGG"
+
+    mp3_offset = find_mp3_frame(data)
+    aac_offset = find_aac_frame(data)
+    if mp3_offset is not None and (
+        aac_offset is None or mp3_offset < aac_offset
+    ):
+        return "MP3"
+    if aac_offset is not None:
+        return "AAC"
+    return None
+
+
+def check_radio_url(url, name=None, declared=None):
+    label = name or url
+    try:
+        actual = detect_radio_format(sample_radio_stream(url))
+    except Exception as error:
+        print("FAIL {}: {}".format(label, error))
+        return 1
+
+    if actual is None:
+        print("FAIL {}: format not recognized".format(label))
+        return 1
+    if declared and actual != declared.upper():
+        print(
+            "FAIL {}: declared {}, detected {}".format(
+                label, declared.upper(), actual
+            )
+        )
+        return 1
+
+    print("PASS {}: live {}".format(label, actual))
+    return 0
+
+
+def check_radio_catalog(path):
+    try:
+        with path.open(encoding="utf-8") as catalog_file:
+            catalog = json.load(catalog_file)
+    except (OSError, json.JSONDecodeError) as error:
+        print("FAIL {}: {}".format(path, error))
+        return 1
+
+    stations = catalog.get("stations")
+    if not isinstance(stations, list):
+        print("FAIL {}: missing stations array".format(path))
+        return 1
+
+    failures = 0
+    for station in stations:
+        if not isinstance(station, dict):
+            print("FAIL {}: invalid station entry".format(path))
+            failures += 1
+            continue
+        name = station.get("name")
+        url = station.get("url")
+        declared = station.get("format", "")
+        if not name or not url:
+            print("FAIL {}: station missing name or URL".format(path))
+            failures += 1
+            continue
+        if declared and declared.upper() not in ("AAC", "MP3", "OGG", "OPUS"):
+            print(
+                "FAIL {}: unsupported or missing format {!r}".format(
+                    name, declared
+                )
+            )
+            failures += 1
+            continue
+        failures += check_radio_url(url, name=name, declared=declared or None)
+    return failures
+
+
+def resolve_radio_catalog(selector):
+    candidate = Path(selector).expanduser()
+    if not candidate.is_absolute():
+        cwd_candidate = Path.cwd() / candidate
+        root_candidate = ROOT / candidate
+        candidate = cwd_candidate if cwd_candidate.exists() else root_candidate
+    if candidate.is_file():
+        return candidate
+
+    region = selector.upper()
+    matches = [
+        path
+        for path in (ROOT / "stations").glob("*.json")
+        if path.stem.upper() == region
+    ]
+    if matches:
+        return matches[0]
+    raise DevError("Unknown radio catalog or region: " + selector)
+
+
+def command_radio(args):
+    if args.radio_command is None:
+        args.command_parser.print_help()
+        return 0
+    return args.radio_handler(args)
+
+
+def command_radio_check(args):
+    selector = args.selector
+    if selector.startswith(("http://", "https://")):
+        return check_radio_url(selector)
+    if selector.lower() == "all":
+        catalogs = sorted((ROOT / "stations").glob("*.json"))
+        if not catalogs:
+            raise DevError("No radio catalogs found")
+        return 1 if sum(check_radio_catalog(path) for path in catalogs) else 0
+    return 1 if check_radio_catalog(resolve_radio_catalog(selector)) else 0
+
+
+def load_pak():
+    with PAK_FILE.open() as source:
+        return json.load(source)
+
+
+def save_pak(pak):
+    with PAK_FILE.open("w") as destination:
+        json.dump(pak, destination, indent=2)
+        destination.write("\n")
+
+
+def latest_version(pak):
+    return next(iter(pak["changelog"]))
+
+
+def normalize_version(version):
+    return version if version.startswith("v") else "v" + version
+
+
+def version_get(_pak, args):
+    print(app_version("auto", args.identifier))
+    return 0
+
+
+def check_release_tag(tag):
+    if not OFFICIAL_VERSION.fullmatch(tag) or len(tag) > RELEASE_TAG_MAX:
+        raise DevError("Invalid release tag {!r}. Expected vMAJOR.MINOR.PATCH or "
+                       "vMAJOR.MINOR.PATCH-<lowercase-label>.N, with no leading zeros, "
+                       "at most {} characters.".format(tag, RELEASE_TAG_MAX))
+
+
+def version_validate_release(pak, args):
+    tag = args.tag
+    check_release_tag(tag)
+    stable = pak.get("version")
+    if not isinstance(stable, str) or not STABLE_VERSION.fullmatch(stable):
+        raise DevError("pak.json must give a stable version, got {!r}.".format(stable))
+    if STABLE_VERSION.fullmatch(tag) and tag != stable:
+        raise DevError("Stable tag {} differs from pak.json version {}.".format(tag, stable))
+    print("{} is a valid {}.".format(
+        tag, "stable release" if STABLE_VERSION.fullmatch(tag) else "pre-release"))
+    return 0
+
+
+def version_latest(pak, _args):
+    version = latest_version(pak)
+    print("{}: {}".format(version, pak["changelog"][version]))
+    return 0
+
+
+def version_list(pak, _args):
+    for version, note in pak["changelog"].items():
+        print("{}: {}".format(version, note))
+    return 0
+
+
+def version_update(pak, args):
+    version = args.version
+    if version not in pak["changelog"]:
+        raise DevError("Version {} not found in changelog.".format(version))
+    text = " ".join(args.text)
+
+    pak["changelog"][version] = text
+    save_pak(pak)
+    print("Updated {}: {}".format(version, text))
+    return 0
+
+
+def update_selfupdate_header(repo_url):
+    match = re.search(r"github\.com/(.+?)(?:\.git)?$", repo_url.rstrip("/"))
+    if not match:
+        raise DevError("cannot parse GitHub repo from " + repo_url)
+    owner_repo = match.group(1)
+
+    content = SELFUPDATE_HEADER.read_text()
+    content = re.sub(
+        r'(#define APP_GITHUB_REPO\s+)"[^"]+"',
+        r'\1"{}"'.format(owner_repo),
+        content,
+    )
+    SELFUPDATE_HEADER.write_text(content)
+    print("src/selfupdate.h -> " + owner_repo)
+
+
+def update_qr_code_header(repo_url):
+    if QR_CODE_HEADER.exists():
+        existing = QR_CODE_HEADER.read_text()
+        if "// Embedded QR code PNG for " + repo_url in existing:
+            print("src/qr_code_data.h already encodes {}, skipping".format(repo_url))
+            return
+
+    try:
+        import qrcode
+    except ImportError as error:
+        raise DevError("qrcode not installed (pip install qrcode[pil])") from error
+
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=7,
+        border=2,
+    )
+    qr.add_data(repo_url)
+    qr.make(fit=True)
+    image = qr.make_image().convert("RGB")
+    width, height = image.size
+    image.save(QR_CODE_PNG)
+
+    if shutil.which("pngcrush"):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+        subprocess.run(
+            [
+                "pngcrush",
+                "-brute",
+                "-noreduce",
+                str(QR_CODE_PNG),
+                str(temporary_path),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if temporary_path.exists() and temporary_path.stat().st_size > 0:
+            before = QR_CODE_PNG.stat().st_size
+            shutil.move(str(temporary_path), QR_CODE_PNG)
+            after = QR_CODE_PNG.stat().st_size
+            print(
+                "pngcrush: {} -> {} bytes ({} saved)".format(
+                    before, after, before - after
+                )
+            )
+        else:
+            temporary_path.unlink(missing_ok=True)
+
+    data = QR_CODE_PNG.read_bytes()
+    lines = []
+    for offset in range(0, len(data), 12):
+        lines.append(
+            "  "
+            + ", ".join(
+                "0x{:02x}".format(byte) for byte in data[offset : offset + 12]
+            )
+        )
+
+    header = (
+        "#ifndef QR_CODE_DATA_H\n"
+        "#define QR_CODE_DATA_H\n"
+        "\n"
+        "#ifdef __cplusplus\n"
+        'extern "C" {\n'
+        "#endif\n"
+        "\n"
+        + "// Embedded QR code PNG for {}\n".format(repo_url)
+        + "// Generated from qr-code.png ({}x{} pixels)\n".format(width, height)
+        + "static const unsigned char qr_code_png[] = {\n"
+        + ",\n".join(lines)
+        + "\n};\n"
+        + "static const unsigned int qr_code_png_len = {};\n".format(len(data))
+        + "\n"
+        + "#ifdef __cplusplus\n"
+        + "}\n"
+        + "#endif\n"
+        + "\n"
+        + "#endif // QR_CODE_DATA_H\n"
+    )
+    QR_CODE_HEADER.write_text(header)
+    print("src/qr_code_data.h -> {}x{}, {} bytes".format(width, height, len(data)))
+
+
+def version_create(pak, args):
+    version = normalize_version(args.version)
+    if not STABLE_VERSION.fullmatch(version):
+        raise DevError("Release preparation requires a stable version. "
+                       "A pre-release is a tag push, with no version create.")
+    check_release_tag(version)
+    text = " ".join(args.text)
+    if version in pak["changelog"]:
+        raise DevError(
+            "Version {} already exists. Use 'version update' to change its note.".format(
+                version
+            )
+        )
+
+    pak["version"] = version
+    pak["changelog"] = {version: text, **pak["changelog"]}
+    save_pak(pak)
+    print("pak.json -> {}: {}".format(version, text))
+
+    update_selfupdate_header(pak["repo_url"])
+    update_qr_code_header(pak["repo_url"])
+    return 0
+
+
+def version_remove(pak, args):
+    version = args.version
+    if version not in pak["changelog"]:
+        raise DevError("Version {} not found in changelog.".format(version))
+
+    note = pak["changelog"][version]
+    confirmation = input(
+        'Remove {}: "{}". Type "Remove" to confirm: '.format(version, note)
+    )
+    if confirmation != "Remove":
+        print("Aborted.")
+        return 0
+
+    was_current = pak["version"] == version
+    if was_current:
+        stable_versions = [key for key in pak["changelog"]
+                           if key != version and STABLE_VERSION.fullmatch(key)]
+        if not stable_versions:
+            raise DevError("No stable versions left after removal.")
+        new_version = max(stable_versions, key=official_version_order)
+        pak["version"] = new_version
+        print("Current version updated to " + new_version)
+
+    del pak["changelog"][version]
+    save_pak(pak)
+    print("Removed {}.".format(version))
+    return 0
+
+
+def command_version(args):
+    if args.version_command is None:
+        args.command_parser.print_help()
+        return 0
+    pak = load_pak()
+    return args.version_handler(pak, args)
+
+
+def device_details(device):
+    """Returns the lines that describe the app on a ready device of a supported
+    platform."""
+    paths = device_paths(device)
+    pids = get_pids(device, "musicplayer.elf")
+    lines = []
+    if pids:
+        for pid in pids:
+            exe = " ".join(adb_shell(
+                device, "readlink", "/proc/{}/exe".format(pid), check=False
+            )) or "?"
+            lines.append(("running", "pid {} {}".format(pid, exe)))
+    else:
+        lines.append(("running", "not running"))
+    try:
+        pak = json.loads("\n".join(adb_shell(
+            device, "cat", paths.pakdir + "/pak.json", check=False
+        )))
+        version = pak.get("version") or "?"
+    except (ValueError, AttributeError):
+        version = "not installed"
+    lines.append(("pak", version))
+    lines.extend((name, getattr(paths, name)) for name in PATH_WORDS.values())
+    return ["  {:<9} {}".format(name, value) for name, value in lines]
+
+
+def command_devices(_args):
+    devices = list_devices()
+    if not devices:
+        print("No ADB devices found.")
+        return 0
+    for index, device in enumerate(devices):
+        if index:
+            print()
+        state = "connected" if device.state == "device" else device.state
+        print("{}  {}  {}  ({})".format(
+            device.serial, state, device.platform, device.hardware
+        ))
+        if device.state == "device" and device.platform in DEVICE_PLATFORMS:
+            print("\n".join(device_details(device)))
+    return 0
+
+
+def command_container(args):
+    if args.container_command in (["-h"], ["--help"]):
+        args.command_parser.print_help()
+        return 0
+    platform = platform_for_alias(args.platform)
+    if platform not in DEVICE_PLATFORMS:
+        raise DevError("Invalid container platform: " + args.platform)
+    command = args.container_command
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        command = ["/bin/bash"]
+    check_dependencies()
+    runtime = container_runtime(args)
+    return run_container(runtime, platform, command, check=False).returncode
+
+
+def command_build(args):
+    platforms = resolve_build_platforms(args.targets)
+    runtime = container_runtime(args)
+    build_platforms(platforms, runtime, args.kind, args.version)
+    return 0
+
+
+def command_test(_args):
+    test_tmp_root = ROOT / ".test_tmp"
+    test_tmp_root.mkdir(parents=True, exist_ok=True)
+    test_tmp_dir = Path(tempfile.mkdtemp(prefix="run-", dir=test_tmp_root))
+    try:
+        env = os.environ.copy()
+        env["TEST_TEMP_DIR"] = str(test_tmp_dir)
+        fetch_zig(ZIG_HOST_SYSTEM)
+        fetch_sqlite()
+        run_command(["make", "-C", str(ROOT / "test")], env=env)
+        return 0
+    finally:
+        shutil.rmtree(test_tmp_dir, ignore_errors=True)
+
+
+def command_clean(args):
+    clean_local()
+    if args.deps:
+        with dependency_lock():
+            clean_dependencies()
+    return 0
+
+
+def dist_archive_name(kind, platform=None):
+    """Return the file name of a package in dist/: the pak zip when `platform` is
+    None, otherwise the .pakz package of `platform`. A debug package has "-debug"
+    in its name, thus it cannot replace a release package."""
+    base = "Music.Player" if kind == "release" else "Music.Player-" + kind
+    if platform is None:
+        return base + ".pak.zip"
+    return "{}-{}.pakz".format(base, platform)
+
+
+def remove_packages(kind):
+    """Remove the packages of `kind` of an earlier run, thus dist/ holds only the
+    packages of this run, and the packages of the other kind."""
+    names = [dist_archive_name(kind)]
+    names += [dist_archive_name(kind, platform) for platform in DEVICE_PLATFORMS]
+    for name in names:
+        archive = DIST_DIR / name
+        if archive.exists():
+            archive.unlink()
+    if DIST_PAKZ_DIR.exists():
+        shutil.rmtree(DIST_PAKZ_DIR)
+
+
+def command_dist(args):
+    platforms = resolve_dist_platforms(args.targets)
+    if args.strict and set(platforms) != set(DEVICE_PLATFORMS):
+        raise DevError(
+            "--strict requires all distribution platforms: "
+            + ", ".join(DEVICE_PLATFORMS)
+        )
+    check_dependencies(strict=args.strict and not args.allow_unpinned)
+    runtime = container_runtime(args)
+    build_platforms(platforms, runtime, args.kind, args.version)
+    remove_packages(args.kind)
+    package = stage_package(platforms, DIST_PAK, strict=args.strict)
+    print("Created " + str(package.relative_to(ROOT)))
+    archive = create_zip(package, DIST_DIR / dist_archive_name(args.kind))
+    print("Created " + str(archive.relative_to(ROOT)))
+    for platform in platforms:
+        source = DIST_PAKZ_DIR / platform
+        stage_package((platform,), source / "Tools" / platform / PAK_NAME, strict=args.strict)
+        archive = create_zip(source, DIST_DIR / dist_archive_name(args.kind, platform))
+        print("Created " + str(archive.relative_to(ROOT)))
+    return 0
+
+
+def split_archive_targets(targets):
+    selectors = []
+    archives = []
+    for target in targets:
+        if target.lower().endswith(".zip"):
+            archives.append(Path(target))
+        else:
+            selectors.append(target)
+    if len(archives) > 1:
+        raise DevError("only one pak zip can be installed at a time")
+    archive = archives[0] if archives else None
+    if archive and not archive.is_file():
+        raise DevError("No such pak zip: " + str(archive))
+    return selectors, archive
+
+
+def command_install_or_run(args, should_run):
+    targets, archive = split_archive_targets(args.targets)
+    if not targets:
+        if archive:
+            raise DevError("installing a pak zip requires a device target")
+        if should_run:
+            targets = ["desktop"]
+        else:
+            raise DevError("install requires at least one target")
+    full = args.full or args.delete or archive is not None
+
+    has_desktop = any(platform_for_alias(target) == "desktop" for target in targets)
+    app_args = getattr(args, "app_args", None) or []
+    if app_args and not has_desktop:
+        raise DevError("arguments after '--' go to the desktop app; add the desktop target")
+    sdcard = getattr(args, "sdcard", None)
+    template = getattr(args, "sdcard_template", None)
+    if (sdcard is not None or template is not None) and not has_desktop:
+        raise DevError("--sdcard and --sdcard-template apply to the desktop target only")
+    if has_desktop:
+        check_desktop_isolation(sdcard, template, app_args)
+
+    only_desktop = all(platform_for_alias(target) == "desktop" for target in targets)
+    if args.delete_data and has_desktop:
+        raise DevError("--delete-data applies to device targets only")
+    if archive and only_desktop:
+        raise DevError("installing a pak zip requires a device target")
+    devices = [] if only_desktop else list_devices()
+    platforms, device_targets = resolve_device_targets(
+        targets, devices, allow_desktop=True
+    )
+    if not archive:
+        runtime = container_runtime(args)
+        build_platforms(platforms, runtime, args.kind, args.version)
+
+    by_platform = {}
+    for device in device_targets:
+        by_platform.setdefault(device.platform, []).append(device)
+
+    failures = []
+    with tempfile.TemporaryDirectory(prefix="music-player-pak-") as temp_dir:
+        unpacked = None
+        if archive:
+            print("Unpacking " + str(archive), flush=True)
+            unpacked = extract_package(archive, Path(temp_dir) / PAK_NAME)
+
+        for platform, matching_devices in by_platform.items():
+            package = unpacked
+            if full and not package:
+                try:
+                    package = stage_package((platform,), DIST_PAK, strict=False)
+                except DevError as error:
+                    failures.append(str(error))
+                    continue
+
+            for device in matching_devices:
+                try:
+                    if args.delete_data:
+                        delete_userdata(device)
+                    if package:
+                        install_full(device, package, delete=args.delete)
+                    else:
+                        install_binary(device)
+                    if should_run:
+                        run_on_device(device)
+                except DevError as error:
+                    failures.append(str(error))
+
+    if should_run and "desktop" in platforms:
+        run_desktop(
+            extra_args=app_args,
+            headless=getattr(args, "headless", False),
+            sdcard=sdcard,
+            template=template,
+        )
+
+    if failures:
+        raise DevError("\n".join(failures))
+    return 0
+
+
+def command_install(args):
+    return command_install_or_run(args, should_run=args.run)
+
+
+def command_run(args):
+    result = command_install_or_run(args, should_run=True)
+    if args.follow:
+        targets = args.targets
+        if not targets or any(
+            platform_for_alias(target) == "desktop" for target in targets
+        ):
+            raise DevError("--follow requires exactly one device target")
+        log_args = argparse.Namespace(targets=targets, follow=True, lines=10)
+        return command_log(log_args)
+    return result
+
+
+def kill_desktop():
+    """Stop every local desktop instance of the app. Gives True when one ran."""
+    result = run_command(
+        ["pkill", "-KILL", "-x", "musicplayer.elf"], capture=True, check=False
+    )
+    return result.returncode == 0
+
+
+def command_kill(args):
+    selectors = []
+    for target in args.targets or ["all"]:
+        if normalize_alias(target) == "all":
+            selectors.append("desktop")
+            selectors.append("all")
+        else:
+            selectors.append(target)
+    kill_all_devices = "all" in selectors
+    selectors = [target for target in selectors if target != "all"]
+
+    only_desktop = not kill_all_devices and all(
+        platform_for_alias(target) == "desktop" for target in selectors
+    )
+    devices = [] if only_desktop else list_devices()
+    platforms, targets = resolve_device_targets(selectors, devices, allow_desktop=True)
+    if kill_all_devices:
+        targets.extend(
+            device
+            for device in devices
+            if device.state == "device" and device.platform in DEVICE_PLATFORMS
+        )
+        targets = list({device.serial: device for device in targets}.values())
+
+    if "desktop" in platforms:
+        state = "Killed" if kill_desktop() else "Not running:"
+        print("{} Music Player on desktop".format(state), flush=True)
+    for device in targets:
+        state = "Killed" if stop_player(device, args.restart) else "Not running:"
+        print("{} Music Player on {}".format(state, device.serial), flush=True)
+    return 0
+
+
+def select_one_device(selectors=None):
+    """Returns the one device that the selectors give. With no selector, uses
+    the one connected device of a supported platform. Raises DevError that names
+    each device that ADB found when the selection gives no device or more than
+    one."""
+    devices = list_devices()
+    try:
+        _platforms, targets = resolve_device_targets(
+            selectors or ["device"], devices, allow_desktop=False
+        )
+        if len(targets) == 1:
+            return targets[0]
+        reason = "{} devices match".format(len(targets))
+    except DevError as error:
+        reason = str(error)
+    found = "\n".join(
+        "  {} {} {}".format(device.serial, device.state, device.platform)
+        for device in devices
+    ) or "  none"
+    raise DevError(
+        "{}; exactly one connected device is necessary. ADB found:\n{}".format(
+            reason, found
+        )
+    )
+
+
+def command_log(args):
+    device = select_one_device(args.targets)
+    log_path = device_paths(device).log
+    command = ["tail", "-n", str(args.lines)]
+    if args.follow:
+        command.append("-f")
+    command.append(log_path)
+    action = "Following" if args.follow else "Reading"
+    print("{} {}:{}".format(action, device.serial, log_path), flush=True)
+    remote_command = shlex.join(command)
+    return run_command(
+        ["adb", "-s", device.serial, "shell", remote_command],
+        check=False,
+    ).returncode
+
+
+def adb_terminal(device, *args):
+    """Run ADB with the terminal of the person. Returns the exit status."""
+    command = ["adb", "-s", device.serial]
+    command.extend(args)
+    return run_command(command, check=False).returncode
+
+
+def device_run_quoted(device, args):
+    """Run args.device_program on the device, with each path word changed and
+    each word quoted."""
+    paths = device_paths(device)
+    words = [expand_path_word(paths, word) for word in args.device_args]
+    return adb_terminal(
+        device, "shell", shlex.join([args.device_program] + words)
+    )
+
+
+def device_shell(device, args):
+    return adb_terminal(device, "shell", *args.device_args)
+
+
+def warn(text):
+    print(colorize("WARNING: " + text, YELLOW), file=sys.stderr, flush=True)
+
+
+def device_pull(device, args):
+    paths = device_paths(device)
+    source = expand_path_word(paths, args.source)
+    local = args.local or PurePosixPath(source).name
+    if source == paths.db:
+        if get_pids(device, "musicplayer.elf"):
+            warn("the app is running, thus the copy can be older than the data "
+                 "of the app. Stop it with ./dev kill.")
+        wal = source + "-wal"
+        if run_command(
+            ["adb", "-s", device.serial, "shell", shlex.join(["test", "-s", wal])],
+            capture=True,
+            check=False,
+        ).returncode == 0:
+            warn("{} holds data that the copy does not have.".format(wal))
+    return adb_terminal(device, "pull", source, local)
+
+
+def device_push(device, args):
+    destination = expand_path_word(device_paths(device), args.destination)
+    return adb_terminal(device, "push", args.local, destination)
+
+
+def command_device(args):
+    if args.device_handler is None:
+        args.command_parser.print_help()
+        return 0
+    return args.device_handler(select_one_device(), args)
+
+
+def add_version_option(parser):
+    parser.add_argument("--version", default="auto",
+                        help="version in the binary (default: auto, with +local)")
+
+
+def add_build_kind_option(parser, default):
+    """Let the caller select what the compiler makes. The default differs by
+    command: a local build is for a person who examines it, a package is for a
+    user."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--debug",
+        dest="kind",
+        action="store_const",
+        const="debug",
+        help="optimized, with debug symbols and the control channel"
+        + (" (default)" if default == "debug" else ""),
+    )
+    group.add_argument(
+        "--release",
+        dest="kind",
+        action="store_const",
+        const="release",
+        help="optimized, stripped, no control channel"
+        + (" (default)" if default == "release" else ""),
+    )
+    parser.set_defaults(kind=default)
+
+
+def add_container_runtime_options(parser, device_builds=True):
+    runtime = parser.add_mutually_exclusive_group()
+    suffix = " for device builds" if device_builds else ""
+    runtime.add_argument(
+        "--docker",
+        dest="container_runtime",
+        action="store_const",
+        const="docker",
+        help="use Docker{}".format(suffix),
+    )
+    runtime.add_argument(
+        "--podman",
+        dest="container_runtime",
+        action="store_const",
+        const="podman",
+        help="use Podman{}".format(suffix),
+    )
+
+
+def add_install_options(parser, include_run, target_help):
+    parser.add_argument("targets", nargs="*", metavar="target", help=target_help)
+    add_container_runtime_options(parser)
+    add_build_kind_option(parser, "debug")
+    add_version_option(parser)
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="install the full pak (default: update only the binary)",
+    )
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="remove the installed pak before uploading it (implies --full)",
+    )
+    parser.add_argument(
+        "--delete-data",
+        action="store_true",
+        help="remove the data of the app from {} before installing "
+        "(does not imply --delete)".format(REMOTE_USERDATA),
+    )
+    if include_run:
+        parser.add_argument("--run", action="store_true", help="run after installing")
+
+
+# The commands that main() changes into a command at another level. Each has a
+# line in the help of its parent, but no block of its own.
+ALIAS_COMMANDS = {("shell",): ("device", "shell")}
+
+
+def parser_tree_help(parser, path=()):
+    """The help of this parser and of each command below it, deepest last.
+    Returns one block of text for each, in the sequence that a reader follows."""
+    blocks = []
+    if path:
+        title = " ".join(path)
+        blocks.append("=" * 72 + "\n{}\n".format(title) + "=" * 72)
+    blocks.append(parser.format_help().rstrip())
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for command in sorted_subactions(action):
+            if path + (command.dest,) in ALIAS_COMMANDS:
+                continue
+            subparser = action.choices[command.dest]
+            blocks.extend(parser_tree_help(subparser, path + (command.dest,)))
+    return blocks
+
+
+def print_all_help(parser):
+    """Give the help of the tool and then the help of every command, thus a
+    reader finds an option without a call for each command."""
+    print("\n\n".join(parser_tree_help(parser)))
+
+
+def create_parser():
+    parser = argparse.ArgumentParser(
+        description="Build and deploy NextUI Music Player",
+        formatter_class=CommandHelpFormatter,
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="with --help, give the help of every command as well",
+    )
+    subparsers = parser.add_subparsers(
+        dest="command",
+        title="commands",
+        metavar="command",
+    )
+
+    deps = subparsers.add_parser(
+        "deps",
+        help="manage build dependencies",
+        description="manage build dependencies",
+        formatter_class=CommandHelpFormatter,
+    )
+    deps_commands = deps.add_subparsers(
+        dest="deps_command",
+        title="commands",
+        metavar="command",
+    )
+
+    deps_list_parser = deps_commands.add_parser(
+        "list",
+        aliases=["status"],
+        help="report what each checkout is sitting on",
+        description="report what each checkout is sitting on",
+        usage="%(prog)s [dependency] [-h]",
+    )
+    deps_list_parser.add_argument("dependency", nargs="?", help="one name, or all")
+    deps_list_parser.set_defaults(deps_handler=command_deps_list)
+
+    deps_fetch_parser = deps_commands.add_parser(
+        "fetch",
+        help="check out anything missing (used by the build)",
+        description=(
+            "check out anything missing; an existing checkout is left as it is "
+            "unless the manifest ref changed and already resolves locally"
+        ),
+        usage="%(prog)s [dependency] [-h] [--force] [--origin checkout]",
+    )
+    deps_fetch_parser.add_argument("dependency", nargs="?", help="one name, or all")
+    deps_fetch_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="restore a user-managed checkout to the manifest ref",
+    )
+    deps_fetch_parser.add_argument(
+        "--origin",
+        metavar="checkout",
+        help="take the NextUI history and the Zig archives from this checkout of "
+        "the app, and clone nothing (default: the main worktree when this "
+        "checkout is a linked git worktree; none to clone and download here)",
+    )
+    deps_fetch_parser.set_defaults(deps_handler=command_deps_fetch)
+
+    deps_update_parser = deps_commands.add_parser(
+        "update",
+        help="refresh from the remote and follow the ref",
+        description="refresh from the remote and follow the ref",
+        usage="%(prog)s [dependency] [-h]",
+    )
+    deps_update_parser.add_argument("dependency", nargs="?", help="one name, or all")
+    deps_update_parser.set_defaults(deps_handler=command_deps_update)
+
+    deps.usage = "%(prog)s [-h] command args"
+    deps.set_defaults(handler=command_deps, command_parser=deps, deps_handler=None)
+
+    build = subparsers.add_parser(
+        "build",
+        help="build locally",
+        description="build locally",
+        usage="%(prog)s target [-h] [--docker | --podman] [--debug | --release]",
+    )
+    build.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help="one or more of desktop (default), tg5040, tg5050, my355, h700, all",
+    )
+    add_container_runtime_options(build)
+    add_build_kind_option(build, "debug")
+    add_version_option(build)
+    build.set_defaults(handler=command_build)
+
+    test = subparsers.add_parser(
+        "test",
+        help="run unit tests",
+        description="run unit tests",
+        usage="%(prog)s [-h]",
+    )
+    test.set_defaults(handler=command_test)
+
+    clean = subparsers.add_parser(
+        "clean",
+        help="remove local generated files",
+        description="remove local generated files",
+        usage="%(prog)s [-h] [--deps]",
+    )
+    clean.add_argument(
+        "--deps",
+        action="store_true",
+        help="also remove the dependency checkouts",
+    )
+    clean.set_defaults(handler=command_clean)
+
+    install = subparsers.add_parser(
+        "install",
+        help="build and install",
+        description="build and install",
+        usage=(
+            "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
+            "[--full] [--delete] [--delete-data] [--run]"
+        ),
+    )
+    add_install_options(
+        install,
+        include_run=True,
+        target_help=(
+            "one or more of desktop, tg5040, tg5050, my355, h700, device, or an ADB serial "
+            "(no default), plus an optional path to a pak zip to install "
+            "instead of building"
+        ),
+    )
+    install.set_defaults(handler=command_install)
+
+    run = subparsers.add_parser(
+        "run",
+        help="build, install, and run",
+        description="build, install, and run",
+        usage=(
+            "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
+            "[--full] [--delete] [--delete-data] [-f]\n"
+            "       %(prog)s desktop [-h] [--headless] [--sdcard dir "
+            "[--sdcard-template dir]] [-- app-argument ...]"
+        ),
+        epilog=(
+            "The desktop target takes more options than a device target,\n"
+            "because it starts a local process:\n"
+            "\n"
+            "  --headless            draw to an offscreen display. The app opens no\n"
+            "                        window and takes no focus, thus a scripted run\n"
+            "                        does not interrupt the user.\n"
+            "  --sdcard dir          run the app with dir in place of the shared sdcard\n"
+            "                        {sdcard}. .system, Tools and Music come\n"
+            "                        from the shared sdcard, read-only, and /tmp is\n"
+            "                        private. Thus runs at one time do not share their\n"
+            "                        data. Needs bwrap. Without bwrap, the run uses the\n"
+            "                        shared sdcard, and dev warns.\n"
+            "  --sdcard-template dir copy dir into the --sdcard directory when that\n"
+            "                        directory is missing or empty.\n"
+            "  -- app-argument ...   give the rest of the line to the app. Example:\n"
+            "                        ./dev run desktop -- --test-control script.txt,std\n"
+            "\n"
+            "./bin/desktop/musicplayer.elf --help gives the options of the app."
+        ).format(sdcard=DESKTOP_SDCARD),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_install_options(
+        run,
+        include_run=False,
+        target_help=(
+            "one or more of desktop (default), tg5040, tg5050, my355, h700, device, or an "
+            "ADB serial, plus an optional path to a pak zip to install "
+            "instead of building"
+        ),
+    )
+    run.add_argument(
+        "--headless",
+        action="store_true",
+        help="desktop only: draw to an offscreen display, with no window",
+    )
+    run.add_argument(
+        "--sdcard",
+        type=Path,
+        metavar="dir",
+        help="desktop only: run with dir in place of the shared sdcard (needs bwrap)",
+    )
+    run.add_argument(
+        "--sdcard-template",
+        type=Path,
+        metavar="dir",
+        help="desktop only: copy dir into the --sdcard directory when it is missing or empty",
+    )
+    run.add_argument("-f", "--follow", action="store_true", help="follow the log")
+    run.set_defaults(handler=command_run)
+
+    dist = subparsers.add_parser(
+        "dist",
+        help="build the app and create the distribution packages",
+        description="build the app and create the pak zip and one .pakz package "
+        "for each platform",
+        usage=(
+            "%(prog)s target [-h] [--docker | --podman] [--debug | --release] "
+            "[--strict] [--allow-unpinned]"
+        ),
+    )
+    dist.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help="one or more of all (default), tg5040, tg5050, my355, h700",
+    )
+    add_container_runtime_options(dist)
+    add_build_kind_option(dist, "release")
+    add_version_option(dist)
+    dist.add_argument(
+        "--strict",
+        action="store_true",
+        help="check that the manifest completely describes the dist package",
+    )
+    dist.add_argument(
+        "--allow-unpinned",
+        action="store_true",
+        help="package a --strict build against unpinned dependencies",
+    )
+    dist.set_defaults(handler=command_dist)
+
+    kill = subparsers.add_parser(
+        "kill",
+        help="stop the app",
+        description="stop the app, with no build",
+        usage="%(prog)s target [-h] [-r]",
+    )
+    kill.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help=(
+            "one or more of all (default), desktop, tg5040, tg5050, my355, h700, device, "
+            "or an ADB serial; all is desktop and every connected device"
+        ),
+    )
+    kill.add_argument(
+        "-r",
+        "--restart",
+        action="store_true",
+        help="start the app again on each device where it ran (no effect on the desktop)",
+    )
+    kill.set_defaults(handler=command_kill)
+
+    log = subparsers.add_parser(
+        "log",
+        help="show the application log",
+        description="show the application log",
+        usage="%(prog)s target [-h] [-f] [-n lines]",
+    )
+    log.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help=(
+            "exactly one of device (default), tg5040, tg5050, my355, h700, or an ADB serial; "
+            "must resolve to one connected device"
+        ),
+    )
+    log.add_argument("-f", "--follow", action="store_true")
+    log.add_argument("-n", "--lines", type=int, default=10)
+    log.set_defaults(handler=command_log)
+
+    help_paths = device_paths(Device(serial="", state="", platform="<platform>"))
+    device = subparsers.add_parser(
+        "device",
+        help="operate on the one connected device",
+        description=(
+            "operate on the connected device of a supported platform;\n"
+            "exactly one such device must be connected"
+        ),
+        epilog=(
+            "In the arguments of ls and rm, the source of pull and the destination\n"
+            "of push, these words change to a path on the device:\n"
+            "\n"
+            "  pakdir    {pakdir}\n"
+            "  userdata  {userdata}\n"
+            "  db        {db}\n"
+            "  log       {log}\n"
+            "\n"
+            "Each word after ls, rm or shell goes to the device, -h too."
+        ).format(**vars(help_paths)),
+        formatter_class=RawEpilogCommandHelpFormatter,
+    )
+    device_commands = device.add_subparsers(
+        dest="device_command",
+        title="commands",
+        metavar="command",
+    )
+
+    device_ls_parser = device_commands.add_parser(
+        "ls",
+        help="list files on the device",
+        description="run ls on the device; each word goes to ls",
+        usage="%(prog)s [ls-option ...] [path ...]",
+        add_help=False,
+    )
+    device_ls_parser.set_defaults(device_handler=device_run_quoted, device_program="ls")
+
+    device_rm_parser = device_commands.add_parser(
+        "rm",
+        help="remove files on the device",
+        description="run rm on the device; each word goes to rm",
+        usage="%(prog)s [rm-option ...] path ...",
+        add_help=False,
+    )
+    device_rm_parser.set_defaults(device_handler=device_run_quoted, device_program="rm")
+
+    device_pull_parser = device_commands.add_parser(
+        "pull",
+        help="copy a file from the device",
+        description="copy a file from the device; pull db prints a warning when the "
+        "copy can be older than the data of the app",
+        usage="%(prog)s source [local-path] [-h]",
+    )
+    device_pull_parser.add_argument(
+        "source", help="a path word or a full device path"
+    )
+    device_pull_parser.add_argument(
+        "local",
+        nargs="?",
+        metavar="local-path",
+        help="the local destination (default: the name of the source file)",
+    )
+    device_pull_parser.set_defaults(device_handler=device_pull)
+
+    device_push_parser = device_commands.add_parser(
+        "push",
+        help="copy a file to the device",
+        description="copy a file to the device; stop the app first with ./dev kill",
+        usage="%(prog)s local-file destination [-h]",
+    )
+    device_push_parser.add_argument("local", metavar="local-file", help="the local file")
+    device_push_parser.add_argument(
+        "destination", help="a path word or a full device path"
+    )
+    device_push_parser.set_defaults(device_handler=device_push)
+
+    device_shell_parser = device_commands.add_parser(
+        "shell",
+        help="run a command on the device, as adb shell does",
+        description="run a command on the device, as adb shell does; with no "
+        "command, open an interactive shell",
+        usage="%(prog)s [command ...]",
+        add_help=False,
+    )
+    device_shell_parser.set_defaults(device_handler=device_shell)
+
+    device.usage = "%(prog)s [-h] command args"
+    device.set_defaults(handler=command_device, command_parser=device, device_handler=None)
+
+    subparsers.add_parser(
+        "shell",
+        help="same as device shell",
+        add_help=False,
+    )
+
+    devices = subparsers.add_parser(
+        "devices",
+        help="list ADB devices and platforms",
+        description="list ADB devices and platforms",
+        usage="%(prog)s [-h]",
+    )
+    devices.set_defaults(handler=command_devices)
+
+    radio = subparsers.add_parser(
+        "radio",
+        help="manage and validate radio stations",
+        description="manage and validate radio stations",
+        formatter_class=CommandHelpFormatter,
+    )
+    radio_commands = radio.add_subparsers(
+        dest="radio_command",
+        title="commands",
+        metavar="command",
+    )
+    radio_check = radio_commands.add_parser(
+        "check",
+        help="check radio streams",
+        description="check radio streams",
+        usage="%(prog)s <file|region|all|url> [-h]",
+    )
+    radio_check.add_argument(
+        "selector",
+        metavar="file|region|all|url",
+        help="catalog path, region code, all catalogs, or one stream URL",
+    )
+    radio_check.set_defaults(radio_handler=command_radio_check)
+    radio.usage = "%(prog)s [-h] command args"
+    radio.set_defaults(handler=command_radio, command_parser=radio)
+
+    version = subparsers.add_parser(
+        "version",
+        help="manage app versions and changelog notes",
+        description="manage app versions and changelog notes",
+        formatter_class=CommandHelpFormatter,
+    )
+    version_commands = version.add_subparsers(
+        dest="version_command",
+        title="commands",
+        metavar="command",
+    )
+
+    version_get_parser = version_commands.add_parser(
+        "get",
+        help="print the version that a build with no --version gets",
+        description="print the version that a build with no --version gets: the "
+        "highest release tag that HEAD contains, or the pak.json version, with "
+        "the build identifier after +",
+    )
+    version_get_parser.add_argument("--identifier", default="local",
+                                    help="build identifier after + (default: local)")
+    version_get_parser.set_defaults(version_handler=version_get)
+
+    version_validate_release_parser = version_commands.add_parser(
+        "validate-release",
+        help="validate a tag as a release",
+        description="validate that a tag has the release form and agrees with pak.json; "
+        "exit with a nonzero status if it does not",
+    )
+    version_validate_release_parser.add_argument("tag", help="the release tag")
+    version_validate_release_parser.set_defaults(version_handler=version_validate_release)
+
+    version_latest_parser = version_commands.add_parser(
+        "latest",
+        help="show the current version and changelog note",
+        description="show the current version and changelog note",
+        usage="%(prog)s [-h]",
+    )
+    version_latest_parser.set_defaults(version_handler=version_latest)
+
+    version_list_parser = version_commands.add_parser(
+        "list",
+        help="list all versions and changelog notes",
+        description="list all versions and changelog notes",
+        usage="%(prog)s [-h]",
+    )
+    version_list_parser.set_defaults(version_handler=version_list)
+
+    version_create_parser = version_commands.add_parser(
+        "create",
+        help="create a version and update derived files",
+        description="create a version and update derived files",
+        usage="%(prog)s version text [-h]",
+    )
+    version_create_parser.add_argument("version", help="version to create")
+    version_create_parser.add_argument(
+        "text",
+        nargs="+",
+        help="changelog note",
+    )
+    version_create_parser.set_defaults(version_handler=version_create)
+
+    version_update_parser = version_commands.add_parser(
+        "update",
+        help="update a changelog note",
+        description="update a changelog note",
+        usage="%(prog)s version text [-h]",
+    )
+    version_update_parser.add_argument("version", help="version to update")
+    version_update_parser.add_argument(
+        "text",
+        nargs="+",
+        help="new changelog note",
+    )
+    version_update_parser.set_defaults(version_handler=version_update)
+
+    version_remove_parser = version_commands.add_parser(
+        "remove",
+        help="remove a version entry",
+        description="remove a version entry",
+        usage="%(prog)s version [-h]",
+    )
+    version_remove_parser.add_argument("version", help="version to remove")
+    version_remove_parser.set_defaults(version_handler=version_remove)
+
+    version.usage = "%(prog)s [-h] command args"
+    version.set_defaults(handler=command_version, command_parser=version)
+
+    container = subparsers.add_parser(
+        "docker",
+        help="run the platform toolchain",
+        description="run the platform toolchain",
+        usage="%(prog)s platform [-h] [--docker | --podman] [--] [command ...]",
+    )
+    add_container_runtime_options(container, device_builds=False)
+    container.add_argument(
+        "platform",
+        nargs="?",
+        default="tg5040",
+        help="one of tg5040 (default), tg5050, my355, h700",
+    )
+    container.add_argument(
+        "container_command",
+        nargs=argparse.REMAINDER,
+        metavar="command",
+        help="command to execute in the container (default: interactive shell)",
+    )
+    container.set_defaults(handler=command_container, command_parser=container)
+
+    parser.usage = "%(prog)s [-h] command args"
+    return parser
+
+
+def split_app_args(argv):
+    """Take the arguments for the desktop app that follow a "--" of a run command.
+
+    Gives the arguments for dev and the arguments for the app. Only the run
+    command has this form, because only the desktop target starts a local
+    process that can accept them.
+    """
+    argv = list(argv)
+    if argv[:1] != ["run"] or "--" not in argv:
+        return argv, []
+    separator = argv.index("--")
+    return argv[:separator], argv[separator + 1:]
+
+
+# The device commands that give each word after their name to the device.
+DEVICE_PASSTHROUGH_COMMANDS = ("ls", "rm", "shell")
+
+
+def split_device_args(argv):
+    """Take the words for the device that follow device ls, rm or shell.
+
+    Changes shell into device shell first. Returns the arguments for dev and the
+    words for the device. argparse would read a word such as -la as an option
+    of dev, thus these words skip the parse.
+    """
+    argv = list(argv)
+    if argv[:1] == ["shell"]:
+        argv.insert(0, "device")
+    if len(argv) < 2 or argv[0] != "device" or argv[1] not in DEVICE_PASSTHROUGH_COMMANDS:
+        return argv, []
+    return argv[:2], argv[2:]
+
+
+def normalize_container_options(argv):
+    argv = list(argv)
+    if argv[:1] != ["docker"]:
+        return argv
+    separator = argv.index("--") if "--" in argv else len(argv)
+    options = [
+        (index, argv[index])
+        for index in range(1, separator)
+        if argv[index] in ("--docker", "--podman")
+    ]
+    if not options:
+        return argv
+    for index, _option in reversed(options):
+        del argv[index]
+    argv[1:1] = [option for _index, option in options]
+    return argv
+
+
+def main():
+    parser = create_parser()
+    argv, app_args = split_app_args(normalize_container_options(sys.argv[1:]))
+    argv, device_args = split_device_args(argv)
+    # --help exits inside argparse, thus --all is read before the parse. The scan
+    # stops at the first "--", because what follows belongs to the app.
+    scan = argv[: argv.index("--")] if "--" in argv else argv
+    if "--all" in scan and ("--help" in scan or "-h" in scan):
+        print_all_help(parser)
+        return 0
+    args = parser.parse_args(argv)
+    args.app_args = app_args
+    args.device_args = device_args
+    if args.command is None:
+        parser.print_help()
+        return 0
+    try:
+        return args.handler(args)
+    except DevError as error:
+        print("ERROR: " + str(error), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

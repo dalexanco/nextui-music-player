@@ -9,6 +9,8 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Supported Platforms
 - **tg5040** - TrimUI Smart Pro / TrimUI Brick / Brick Hammer
 - **tg5050** - TrimUI Smart Pro S
+- **my355** - Miyoo Flip
+- **h700** - Anbernic (H700)
 
 ![music_player](https://github.com/user-attachments/assets/de4fe612-1c48-4e98-9537-79504e20f299)
 
@@ -16,13 +18,25 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Installation
 
 ### Manual Installation
+
+Each release has one `.pakz` package for each platform:
+
+| Device                         | Package                    |
+|--------------------------------|----------------------------|
+| TrimUI Brick, TrimUI Smart Pro | `Music.Player-tg5040.pakz` |
+| TrimUI Smart Pro S             | `Music.Player-tg5050.pakz` |
+| Miyoo Flip                     | `Music.Player-my355.pakz`  |
+| Anbernic RG XX (H700) devices  | `Music.Player-h700.pakz`   |
+
+A `Music.Player-debug-<platform>.pakz` package holds a debug build, which writes
+more lines to the log. Install it only to help find the cause of a problem.
+
 1. Mount your NextUI SD card to a computer.
-2. Download the latest release file named `Music.Player.pak.zip` from Github.
-3. Copy the zip file to `/Tools/<PLATFORM>/Music.Player.pak.zip` (replace `<PLATFORM>` with your device: `tg5040` or `tg5050`).
-4. Extract the zip in place, then delete the zip file.
-5. Confirm that there is a `/Tools/<PLATFORM>/Music.Player.pak` folder on your SD card.
-6. Rename the `Music.Player.pak` folder to `Music Player.pak`.
-7. Unmount your SD Card and insert it into your TrimUI device.
+2. Download the `.pakz` package for device from the latest release on Github.
+3. Copy the package to the root of the SD card
+  - You can put several `.pakz` files if you use SD card on several devices.
+4. Unmount your SD card and insert it into your device.
+5. Start the device. NextUI installs each package and then deletes it.
 
 ### Pak Store Installation
 
@@ -38,8 +52,9 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Features
 
 ### General
+- Complete support of NextUI theme and power settings.
 - Support Bluetooth/USB-C devices for output and media controls.
-- Automatic screen off (Follow system screen timeout).
+- Automatic screen off.
 
 ### Library
 - Supports `WAV`, `MP3`, `OGG`, `FLAC`, `M4A`, `AAC` and `OPUS` formats
@@ -54,13 +69,15 @@ A comprehensive music playback application for NextUI featuring local file playb
 ### Online Radio
 - Preset station management (add, remove, save)
 - Curated station browser organized by country (Only Malaysia for now - others will be added later; please suggest)
-- Support for `MP3` and `AAC` streams, direct streaming (Shoutcast/Icecast) and `HLS` (m3u8).
+- Support for `MP3`, `AAC`, Ogg Vorbis, and Ogg Opus streams, direct streaming
+  (Shoutcast/Icecast) and `HLS` (m3u8).
 - HTTPS support via mbedTLS
 - Metadata display (song title, artist, station info)
 - Album art display (Downloaded from internet based on current song)
 
 ### Podcast
 - Search Apple Podcast for podcast source
+- Import podcasts from a file dropped on the SD card (feed list, OPML or shortcut)
 - Subscription management
 - Download episodes for local offline playback
 - Podcast files will be placed in `./Podcasts`
@@ -123,7 +140,28 @@ A comprehensive music playback application for NextUI featuring local file playb
 - Select which subscribed podcast you wish to listen.
 - Download any episode you wish to listen.
 - Once downloaded, it will be available to play.
-- Press `Y` button to manage subscriptions.  
+- Press `Y` button to manage subscriptions.
+
+#### Add a podcast from a file
+Some shows (Radio France, for one) are missing from the Apple directory, and typing a feed address
+with a gamepad is a chore. Instead, drop a file in `Podcasts/Subscriptions/` on the SD card
+(the folder appears the first time you open `Podcasts`):
+
+- `.txt`: one feed address per line, then an optional title. `#` starts a comment.
+- `.opml`: the export of your podcast app, many shows at once.
+- `.url`: an internet shortcut to one feed.
+
+Example, `bestioles.txt`:
+
+```
+# France Inter
+https://radiofrance-podcast.net/podcast09/podcast_a80ecbd5-df3d-4c9d-bee7-4e3d9efc1974.xml Bestioles
+```
+
+Open `Podcasts` with Wi-Fi on and the shows are added, with a message that says how many. `Y` >
+`Search and top shows` > `Import from SD card` lists what became of each feed. A file that was read moves to
+`imported/`; the feeds that failed are written, with the reason, to `<name>.failed.txt`. See
+[docs/podcast-import.md](docs/podcast-import.md) for how to find a feed address.
 
 ## Building from Source
 
@@ -225,3 +263,6 @@ The music player uses:
 - **Shared code**: `workspace/all/common/` (utils, api, config, scaler)
 - **Platform code**: `workspace/<PLATFORM>/platform/`
 - **Libraries**: SDL2, SDL2_image, SDL2_ttf, GLESv2, EGL, libsamplerate, libzip, mbedTLS, ALSA
+
+[DEV_README.md](DEV_README.md) tells how to build, run and test the player, and how its code
+is organized.

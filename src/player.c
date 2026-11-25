@@ -29,11 +29,14 @@ struct input_event_raw {
     uint16_t code;
     int32_t value;
 };
+#include <errno.h>
 #include <samplerate.h>
+#include <dlfcn.h>
 #include <SDL2/SDL_image.h>
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "msettings.h"
 
 // Include dr_libs for audio decoding (header-only libraries)
@@ -52,6 +55,10 @@ struct input_event_raw {
 // For M4A/AAC we use minimp4 for demuxing and FDK-AAC for decoding
 #define MINIMP4_IMPLEMENTATION
 #include "audio/minimp4.h"
+#include "mp3_seek.h"
+#include "id3.h"
+#include "utf8.h"
+#include "audio/sonic.h"
 #include <fdk-aac/aacdecoder_lib.h>
 #include <opusfile.h>
 
@@ -83,6 +90,7 @@ typedef struct {
     int channels;
     int frame_size;             // PCM frames per AAC frame (1024 or 2048 for HE-AAC)
     int64_t file_size;
+    int64_t audio_start;        // byte offset of the first ADTS frame (after an ID3v2 tag)
     // File read buffer
     uint8_t* read_buf;
     int read_buf_size;
@@ -91,6 +99,20 @@ typedef struct {
     size_t leftover_count;
     size_t leftover_capacity;
 } AACFileDecoder;
+
+// Size in bytes of the ID3v2 tag at the start of a file, or 0 if the file has none.
+// Raw ADTS files often carry one, and it can be larger than the first read.
+static int64_t id3v2_tag_bytes(FILE* f) {
+    uint8_t h[10];
+    if (fseek(f, 0, SEEK_SET) != 0 || fread(h, 1, sizeof(h), f) != sizeof(h)) return 0;
+    if (h[0] != 'I' || h[1] != 'D' || h[2] != '3') return 0;
+
+    int64_t size = ((int64_t)(h[6] & 0x7F) << 21) | ((h[7] & 0x7F) << 14) |
+                   ((h[8] & 0x7F) << 7) | (h[9] & 0x7F);
+    size += 10;                     // header
+    if (h[5] & 0x10) size += 10;    // footer (ID3v2.4)
+    return size;
+}
 
 // minimp4 read callback - returns 0 on success, non-zero on failure
 static int m4a_read_callback(int64_t offset, void* buffer, size_t size, void* token) {
@@ -106,7 +128,7 @@ static int m4a_read_callback(int64_t offset, void* buffer, size_t size, void* to
 }
 
 // Sample rates for different audio outputs
-#define SAMPLE_RATE_BLUETOOTH 44100  // 44.1kHz for Bluetooth A2DP compatibility
+#define SAMPLE_RATE_BLUETOOTH 48000  // 48kHz for Bluetooth where the NextUI setting has no valid rate
 #define SAMPLE_RATE_SPEAKER   48000  // 48kHz for speaker output
 #define SAMPLE_RATE_USB_DAC   48000  // 48kHz for USB DAC output
 #define SAMPLE_RATE_DEFAULT   48000  // Default fallback
@@ -130,6 +152,18 @@ static inline int16_t speaker_soft_limit(int16_t sample, float threshold) {
     float compressed = threshold + headroom * over / (over + headroom);
 
     return (int16_t)(sign * compressed * 32767.0f);
+}
+
+static const float soft_limiter_thresholds[] = {0.0f, 0.7f, 0.6f, 0.5f};
+#define SOFT_LIMITER_VALUE_COUNT 4
+#define DEFAULT_SOFT_LIMITER_INDEX 2
+
+static float speaker_soft_limiter_threshold(void) {
+    int index = Settings_getInt(&SETTING_SOFT_LIMITER);
+    if (index < 0 || index >= SOFT_LIMITER_VALUE_COUNT) {
+        index = DEFAULT_SOFT_LIMITER_INDEX;
+    }
+    return soft_limiter_thresholds[index];
 }
 
 // High-pass biquad filter for built-in speaker to remove sub-bass
@@ -182,23 +216,41 @@ static inline int16_t speaker_hpf_process(int16_t sample, int channel) {
 }
 
 // Global player context
-static PlayerContext player = {0};
-static int64_t audio_position_samples = 0;  // Track position in samples for precision
+static PlayerContext player;
+// The time that played, in frames of the output rate at speed 1x. A frame that
+// plays at speed 2x counts as two, thus a change of speed does not scale the past.
+static double audio_position_samples = 0;
 static WaveformData waveform = {0};  // Waveform overview for progress display
 static int current_sample_rate = SAMPLE_RATE_DEFAULT;  // Track current SDL audio device rate
 static bool bluetooth_audio_active = false;  // Track if Bluetooth audio is active
 static bool usbdac_audio_active = false;     // Track if USB DAC is active
 
 // Get target sample rate based on current audio sink
+// The output rate for Bluetooth. This is the value of PLAT_pickSampleRate() of NextUI for
+// a connected device, thus the player and the emulators ask BlueALSA for the same rate.
+// PLAT_pickSampleRate() itself runs `hcitool` to find a connection, which is too slow for
+// the stream thread. A fixed 44.1 kHz stalled SDL: through BlueALSA at 44.1 kHz, the
+// audio callback never ran on a link at 48 kHz.
+// The rate is the limit of the NextUI settings as it is: the Bluetooth stack chooses the
+// profile and the codec, thus any standard rate can be right. A value outside the standard
+// rates (8 to 192 kHz) is not from the settings, and gets 48 kHz.
+#define SAMPLE_RATE_MIN   8000
+#define SAMPLE_RATE_MAX 192000
+static int bluetooth_sample_rate(void) {
+    int limit = CFG_getBluetoothSamplingrateLimit();
+    if (limit < SAMPLE_RATE_MIN || limit > SAMPLE_RATE_MAX) return SAMPLE_RATE_BLUETOOTH;
+    return limit;
+}
+
 static int get_target_sample_rate(void) {
     if (bluetooth_audio_active) {
-        return SAMPLE_RATE_BLUETOOTH;  // 44100 Hz for Bluetooth
+        return bluetooth_sample_rate();
     }
     // Check audio sink from msettings
     int sink = GetAudioSink();
     switch (sink) {
         case AUDIO_SINK_BLUETOOTH:
-            return SAMPLE_RATE_BLUETOOTH;  // 44100 Hz
+            return bluetooth_sample_rate();
         case AUDIO_SINK_USBDAC:
             return SAMPLE_RATE_USB_DAC;    // 48000 Hz
         default:
@@ -208,6 +260,36 @@ static int get_target_sample_rate(void) {
 
 // Forward declaration for audio device change callback
 static void audio_device_change_callback(int device_type, int event);
+
+// The watcher thread records a change of the audio sink here; the main thread
+// handles it in Player_handleAudioSinkChange(), because SDL audio must not be
+// restarted from another thread while the main thread uses it
+static volatile bool audio_sink_changed = false;
+
+// Let alsa-lib read its configuration (~/.asoundrc) again at the next open. The build
+// of some devices has no alsa-lib (my355: tinyalsa only), but SDL loads it at run time
+// there too, thus the function comes from the copy that is loaded. Without alsa-lib
+// in the process, there is nothing to reload.
+static void alsa_reload_configuration(void) {
+    void* alsa = dlopen("libasound.so.2", RTLD_NOW | RTLD_NOLOAD);
+    if (!alsa) {
+        LOG_info("Audio: alsa-lib is not loaded, no configuration to reload\n");
+        return;
+    }
+    int (*free_global)(void) = (int (*)(void))dlsym(alsa, "snd_config_update_free_global");
+    if (free_global) {
+        free_global();
+    } else {
+        LOG_error("Audio: alsa-lib has no snd_config_update_free_global()\n");
+    }
+    dlclose(alsa);
+}
+static volatile uint32_t audio_sink_changed_at = 0;
+// The sink changes in steps (the file is written, then written again), thus the
+// main thread waits this long after the last event
+#define AUDIO_SINK_SETTLE_MS 300
+// Counts the sink changes that the main thread handled, for the redraw of the status pill
+static unsigned audio_sink_generation = 0;
 
 // Forward declaration for FLAC metadata callback
 static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata);
@@ -219,7 +301,7 @@ static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata);
 
 // Circular buffer functions
 static int circular_buffer_init(CircularBuffer* cb, size_t capacity_frames) {
-    cb->buffer = malloc(capacity_frames * sizeof(int16_t) * AUDIO_CHANNELS);
+    cb->buffer = (int16_t*)malloc(capacity_frames * sizeof(int16_t) * AUDIO_CHANNELS);
     if (!cb->buffer) {
         LOG_error("Failed to allocate circular buffer (%zu KB)\n",
                   capacity_frames * sizeof(int16_t) * AUDIO_CHANNELS / 1024);
@@ -325,6 +407,70 @@ static size_t circular_buffer_read(CircularBuffer* cb, int16_t* data, size_t fra
 
 // ============ STREAMING DECODER INTERFACE ============
 
+// The seek table of an MP3 file (embedded or indexed CBR), and the one point
+// that the next seek binds to the decoder
+typedef struct {
+    Mp3SeekInfo info;
+    FILE* file;
+    int64_t file_size;
+    drmp3_seek_point point;
+} Mp3SeekState;
+
+static int64_t mp3_seek_read(void* ctx, int64_t offset, uint8_t* buf, int64_t len) {
+    FILE* f = (FILE*)ctx;
+    if (fseek(f, (long)offset, SEEK_SET) != 0) return 0;
+    return (int64_t)fread(buf, 1, (size_t)len, f);
+}
+
+// Read an embedded table, or scan headerless CBR synchronously to build an index.
+// Returns NULL where neither is usable. Duration scanning stays separate.
+static Mp3SeekState* mp3_seek_open(const char* filepath, const drmp3* mp3, int64_t total_frames) {
+    Mp3SeekState* state = (Mp3SeekState*)calloc(1, sizeof(Mp3SeekState));
+    if (!state) return NULL;
+    state->file = fopen(filepath, "rb");
+    if (state->file) {
+        fseek(state->file, 0, SEEK_END);
+        state->file_size = ftell(state->file);
+        if (Mp3Seek_init(&state->info, mp3_seek_read, state->file, state->file_size,
+                         (int64_t)mp3->streamStartOffset)) {
+            // Reservoir validation happens during indexing. This extra count
+            // check compares the index with the separate duration scan only.
+            if (state->info.kind != MP3_SEEK_CBR_INDEX ||
+                state->info.frame_count * state->info.samples_per_frame == total_frames) {
+                return state;
+            }
+            Mp3Seek_free(&state->info);
+        }
+        fclose(state->file);
+    }
+    free(state);
+    return NULL;
+}
+
+static void mp3_seek_close(Mp3SeekState* state) {
+    if (!state) return;
+    Mp3Seek_free(&state->info);
+    fclose(state->file);
+    free(state);
+}
+
+// Seek an MP3 decoder. With a seek table, the decoder starts from a frame near the
+// target; without one, it decodes from the start (a seek backward) or from here.
+static bool mp3_seek_to_frame(drmp3* mp3, Mp3SeekState* state, int64_t frame) {
+    Mp3SeekPoint point;
+    if (state && Mp3Seek_pointFor(&state->info, mp3_seek_read, state->file, state->file_size,
+                                  frame, &point)) {
+        state->point.seekPosInBytes = (drmp3_uint64)point.byte_pos;
+        state->point.pcmFrameIndex = (drmp3_uint64)point.pcm_frame;
+        state->point.mp3FramesToDiscard = (drmp3_uint16)point.frames_to_discard;
+        state->point.pcmFramesToDiscard = 0;
+        drmp3_bind_seek_table(mp3, 1, &state->point);
+    } else {
+        drmp3_bind_seek_table(mp3, 0, NULL);
+    }
+    return drmp3_seek_to_pcm_frame(mp3, (drmp3_uint64)frame);
+}
+
 // Open decoder and read metadata (doesn't decode audio yet)
 static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
     memset(sd, 0, sizeof(StreamDecoder));
@@ -337,7 +483,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
 
     switch (sd->format) {
         case AUDIO_FORMAT_MP3: {
-            drmp3* mp3 = malloc(sizeof(drmp3));
+            drmp3* mp3 = (drmp3*)malloc(sizeof(drmp3));
             if (!mp3 || !drmp3_init_file(mp3, filepath, NULL)) {
                 free(mp3);
                 LOG_error("Stream: Failed to open MP3: %s\n", filepath);
@@ -347,10 +493,11 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             sd->source_sample_rate = mp3->sampleRate;
             sd->source_channels = mp3->channels;
             sd->total_frames = drmp3_get_pcm_frame_count(mp3);
+            sd->mp3_seek = mp3_seek_open(filepath, mp3, sd->total_frames);
             break;
         }
         case AUDIO_FORMAT_WAV: {
-            drwav* wav = malloc(sizeof(drwav));
+            drwav* wav = (drwav*)malloc(sizeof(drwav));
             if (!wav || !drwav_init_file(wav, filepath, NULL)) {
                 free(wav);
                 LOG_error("Stream: Failed to open WAV: %s\n", filepath);
@@ -363,7 +510,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             break;
         }
         case AUDIO_FORMAT_FLAC: {
-            drflac* flac = drflac_open_file_with_metadata(filepath, flac_metadata_callback, NULL, NULL);
+            drflac* flac = drflac_open_file(filepath, NULL);
             if (!flac) {
                 LOG_error("Stream: Failed to open FLAC: %s\n", filepath);
                 return -1;
@@ -402,7 +549,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             break;
         }
         case AUDIO_FORMAT_M4A: {
-            M4ADecoder* m4a = malloc(sizeof(M4ADecoder));
+            M4ADecoder* m4a = (M4ADecoder*)malloc(sizeof(M4ADecoder));
             if (!m4a) {
                 LOG_error("Stream: Failed to allocate M4A decoder\n");
                 return -1;
@@ -481,7 +628,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
 
             // Allocate frame buffer (AAC frames are typically < 2KB)
             m4a->frame_buffer_size = 8192;
-            m4a->frame_buffer = malloc(m4a->frame_buffer_size);
+            m4a->frame_buffer = (uint8_t*)malloc(m4a->frame_buffer_size);
             if (!m4a->frame_buffer) {
                 aacDecoder_Close(m4a->aac_decoder);
                 MP4D_close(&m4a->mp4);
@@ -507,7 +654,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             break;
         }
         case AUDIO_FORMAT_AAC: {
-            AACFileDecoder* aac = malloc(sizeof(AACFileDecoder));
+            AACFileDecoder* aac = (AACFileDecoder*)malloc(sizeof(AACFileDecoder));
             if (!aac) {
                 LOG_error("Stream: Failed to allocate AAC decoder\n");
                 return -1;
@@ -515,7 +662,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             memset(aac, 0, sizeof(AACFileDecoder));
 
             // Allocate read buffer
-            aac->read_buf = malloc(AAC_FILE_READ_BUF_SIZE);
+            aac->read_buf = (uint8_t*)malloc(AAC_FILE_READ_BUF_SIZE);
             if (!aac->read_buf) {
                 free(aac);
                 LOG_error("Stream: Failed to allocate AAC read buffer\n");
@@ -533,7 +680,9 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             // Get file size
             fseek(aac->file, 0, SEEK_END);
             aac->file_size = ftell(aac->file);
-            fseek(aac->file, 0, SEEK_SET);
+            aac->audio_start = id3v2_tag_bytes(aac->file);
+            if (aac->audio_start >= aac->file_size) aac->audio_start = 0;
+            fseek(aac->file, (long)aac->audio_start, SEEK_SET);
 
             // Open FDK-AAC decoder with ADTS transport (handles sync internally)
             aac->aac_decoder = aacDecoder_Open(TT_MP4_ADTS, 1);
@@ -585,11 +734,11 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             // Estimate total PCM frames from bitrate
             CStreamInfo* aac_info = aacDecoder_GetStreamInfo(aac->aac_decoder);
             if (aac_info && aac_info->bitRate > 0) {
-                double duration_sec = (double)aac->file_size * 8.0 / (double)aac_info->bitRate;
+                double duration_sec = (double)(aac->file_size - aac->audio_start) * 8.0 / (double)aac_info->bitRate;
                 sd->total_frames = (int64_t)(duration_sec * aac->sample_rate);
             } else {
                 // Fallback: assume 128kbps
-                sd->total_frames = (int64_t)((double)aac->file_size * 8.0 / 128000.0 * aac->sample_rate);
+                sd->total_frames = (int64_t)((double)(aac->file_size - aac->audio_start) * 8.0 / 128000.0 * aac->sample_rate);
             }
 
             // Don't seek back — continue from where we are with remaining buffered data
@@ -620,7 +769,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
             drmp3* mp3 = (drmp3*)sd->decoder;
             if (sd->source_channels == 1) {
                 // Read mono, convert to stereo
-                int16_t* mono = malloc(frames * sizeof(int16_t));
+                int16_t* mono = (int16_t*)malloc(frames * sizeof(int16_t));
                 if (mono) {
                     frames_read = drmp3_read_pcm_frames_s16(mp3, frames, mono);
                     for (size_t i = 0; i < frames_read; i++) {
@@ -637,7 +786,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
         case AUDIO_FORMAT_WAV: {
             drwav* wav = (drwav*)sd->decoder;
             if (sd->source_channels == 1) {
-                int16_t* mono = malloc(frames * sizeof(int16_t));
+                int16_t* mono = (int16_t*)malloc(frames * sizeof(int16_t));
                 if (mono) {
                     frames_read = drwav_read_pcm_frames_s16(wav, frames, mono);
                     for (size_t i = 0; i < frames_read; i++) {
@@ -654,7 +803,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
         case AUDIO_FORMAT_FLAC: {
             drflac* flac = (drflac*)sd->decoder;
             if (sd->source_channels == 1) {
-                int16_t* mono = malloc(frames * sizeof(int16_t));
+                int16_t* mono = (int16_t*)malloc(frames * sizeof(int16_t));
                 if (mono) {
                     frames_read = drflac_read_pcm_frames_s16(flac, frames, mono);
                     for (size_t i = 0; i < frames_read; i++) {
@@ -721,7 +870,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
                 // Read AAC frame data
                 if (frame_bytes > m4a->frame_buffer_size) {
                     // Resize buffer if needed
-                    uint8_t* new_buf = realloc(m4a->frame_buffer, frame_bytes);
+                    uint8_t* new_buf = (uint8_t*)realloc(m4a->frame_buffer, frame_bytes);
                     if (!new_buf) {
                         break;
                     }
@@ -779,7 +928,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
                             // Ensure leftover buffer has enough capacity
                             if ((size_t)leftover_frames > m4a->leftover_capacity) {
                                 size_t new_cap = leftover_frames + 256;  // Add some headroom
-                                int16_t* new_buf = realloc(m4a->leftover_buffer,
+                                int16_t* new_buf = (int16_t*)realloc(m4a->leftover_buffer,
                                                            new_cap * sizeof(int16_t) * 2);
                                 if (new_buf) {
                                     m4a->leftover_buffer = new_buf;
@@ -891,7 +1040,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
                             if (leftover_frames > 0) {
                                 if ((size_t)leftover_frames > aac->leftover_capacity) {
                                     size_t new_cap = leftover_frames + 256;
-                                    int16_t* new_buf = realloc(aac->leftover_buffer,
+                                    int16_t* new_buf = (int16_t*)realloc(aac->leftover_buffer,
                                                                new_cap * sizeof(int16_t) * 2);
                                     if (new_buf) {
                                         aac->leftover_buffer = new_buf;
@@ -950,7 +1099,7 @@ static int stream_decoder_seek(StreamDecoder* sd, int64_t frame) {
     bool success = false;
     switch (sd->format) {
         case AUDIO_FORMAT_MP3:
-            success = drmp3_seek_to_pcm_frame((drmp3*)sd->decoder, frame);
+            success = mp3_seek_to_frame((drmp3*)sd->decoder, (Mp3SeekState*)sd->mp3_seek, frame);
             break;
         case AUDIO_FORMAT_WAV:
             success = drwav_seek_to_pcm_frame((drwav*)sd->decoder, frame);
@@ -986,12 +1135,12 @@ static int stream_decoder_seek(StreamDecoder* sd, int64_t frame) {
             // Estimate byte position from frame position
             if (sd->total_frames > 0 && aac->file_size > 0) {
                 double ratio = (double)frame / (double)sd->total_frames;
-                int64_t byte_pos = (int64_t)(ratio * aac->file_size);
+                int64_t byte_pos = aac->audio_start + (int64_t)(ratio * (aac->file_size - aac->audio_start));
                 if (byte_pos >= aac->file_size) byte_pos = aac->file_size - 1;
-                if (byte_pos < 0) byte_pos = 0;
+                if (byte_pos < aac->audio_start) byte_pos = aac->audio_start;
                 fseek(aac->file, (long)byte_pos, SEEK_SET);
             } else {
-                fseek(aac->file, 0, SEEK_SET);
+                fseek(aac->file, (long)aac->audio_start, SEEK_SET);
             }
             // Clear decoder state and buffers
             aac->read_buf_size = 0;
@@ -1019,6 +1168,8 @@ static void stream_decoder_close(StreamDecoder* sd) {
         case AUDIO_FORMAT_MP3:
             drmp3_uninit((drmp3*)sd->decoder);
             free(sd->decoder);
+            mp3_seek_close((Mp3SeekState*)sd->mp3_seek);
+            sd->mp3_seek = NULL;
             break;
         case AUDIO_FORMAT_WAV:
             drwav_uninit((drwav*)sd->decoder);
@@ -1085,27 +1236,23 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
                              int src_rate, int dst_rate,
                              int16_t* output, size_t max_output_frames,
                              SRC_STATE* src_state, bool is_last) {
-    // Apply playback speed to the ratio
-    float speed = player.playback_speed;
-    if (speed < 0.5f) speed = 1.0f;  // Safety fallback
-
-    if (src_rate == dst_rate && speed == 1.0f) {
+    // The speed is not here: the time stretch after this changes it, and keeps the pitch
+    if (src_rate == dst_rate) {
         // No resampling needed, just copy
         size_t to_copy = (input_frames < max_output_frames) ? input_frames : max_output_frames;
         memcpy(output, input, to_copy * sizeof(int16_t) * AUDIO_CHANNELS);
         return to_copy;
     }
 
-    // Dividing by speed: >1.0 speed means lower ratio = fewer output samples = faster playback
-    double ratio = ((double)dst_rate / (double)src_rate) / (double)speed;
+    double ratio = (double)dst_rate / (double)src_rate;
 
     // Calculate total input frames (leftover from previous call + new input)
     size_t leftover_count = player.resample_leftover_count;
     size_t total_input_frames = leftover_count + input_frames;
 
     // Allocate buffers for combined input
-    float* float_in = malloc(total_input_frames * AUDIO_CHANNELS * sizeof(float));
-    float* float_out = malloc(max_output_frames * AUDIO_CHANNELS * sizeof(float));
+    float* float_in = (float*)malloc(total_input_frames * AUDIO_CHANNELS * sizeof(float));
+    float* float_out = (float*)malloc(max_output_frames * AUDIO_CHANNELS * sizeof(float));
     if (!float_in || !float_out) {
         free(float_in);
         free(float_out);
@@ -1158,7 +1305,7 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
     if (unconsumed > 0 && !is_last) {
         // Ensure leftover buffer has enough capacity
         if (unconsumed > player.resample_leftover_capacity) {
-            int16_t* new_buf = realloc(player.resample_leftover,
+            int16_t* new_buf = (int16_t*)realloc(player.resample_leftover,
                                        unconsumed * AUDIO_CHANNELS * sizeof(int16_t));
             if (new_buf) {
                 player.resample_leftover = new_buf;
@@ -1190,19 +1337,73 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
 
 // ============ STREAMING DECODE THREAD ============
 
+// Set by reopen_audio_device(), cleared by the stream thread after it resets the resampler
+static volatile bool stream_resampler_reset = false;
+
+// ============ TIME STRETCH ============
+
+// The playback speed, with the pitch kept (Sonic). The stream thread owns the
+// stream: load_streaming() creates it before the thread starts, and
+// Player_stop() frees it after the thread ends.
+static sonicStream time_stretch = NULL;
+static bool time_stretch_active = false;  // the stream holds audio of a speed other than 1x
+
+#define TIME_STRETCH_READ_FRAMES 4096
+
+// Move the audio that the time stretch has ready into the stream buffer
+static void time_stretch_drain(int16_t* scratch) {
+    int frames;
+    while ((frames = sonicReadShortFromStream(time_stretch, scratch, TIME_STRETCH_READ_FRAMES)) > 0) {
+        circular_buffer_write(&player.stream_buffer, scratch, (size_t)frames);
+    }
+}
+
+// Pass a chunk at the output rate through the time stretch, into the stream buffer
+static void time_stretch_write(int16_t* pcm, size_t frames, float speed, int16_t* scratch) {
+    if (!time_stretch) {
+        // No stream (out of memory): the audio plays at 1x
+        circular_buffer_write(&player.stream_buffer, pcm, frames);
+        return;
+    }
+    if (speed == 1.0f) {
+        // The audio of the old speed goes out first, then the time stretch is idle
+        if (time_stretch_active) {
+            sonicFlushStream(time_stretch);
+            time_stretch_drain(scratch);
+            time_stretch_active = false;
+        }
+        circular_buffer_write(&player.stream_buffer, pcm, frames);
+        return;
+    }
+
+    sonicSetSpeed(time_stretch, speed);
+    sonicWriteShortToStream(time_stretch, pcm, (int)frames);
+    time_stretch_active = true;
+    time_stretch_drain(scratch);
+}
+
+// Drop the audio in the time stretch, after a seek or a new output rate
+static void time_stretch_reset(int sample_rate) {
+    if (time_stretch) sonicDestroyStream(time_stretch);
+    time_stretch = sonicCreateStream(sample_rate, AUDIO_CHANNELS);
+    time_stretch_active = false;
+}
+
 static void* stream_thread_func(void* arg) {
     (void)arg;
 
     // Allocate decode buffer
-    int16_t* decode_buffer = malloc(DECODE_CHUNK_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* decode_buffer = (int16_t*)malloc(DECODE_CHUNK_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
     // Resample output buffer (allow for 2x expansion)
     size_t resample_buffer_size = DECODE_CHUNK_FRAMES * 3;
-    int16_t* resample_buffer = malloc(resample_buffer_size * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* resample_buffer = (int16_t*)malloc(resample_buffer_size * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* stretch_buffer = (int16_t*)malloc(TIME_STRETCH_READ_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
 
-    if (!decode_buffer || !resample_buffer) {
+    if (!decode_buffer || !resample_buffer || !stretch_buffer) {
         LOG_error("Stream thread: Failed to allocate buffers\n");
         free(decode_buffer);
         free(resample_buffer);
+        free(stretch_buffer);
         return NULL;
     }
 
@@ -1216,8 +1417,20 @@ static void* stream_thread_func(void* arg) {
             }
             // Clear resampler leftover buffer to avoid playing stale samples
             player.resample_leftover_count = 0;
+            time_stretch_reset(get_target_sample_rate());
             player.stream_eof = false;  // Reset EOF flag on seek
             player.stream_seeking = false;
+        }
+
+        // A new output device is a break in the stream, as a seek is: the
+        // resampler starts again, and its leftover samples are for the old rate
+        if (stream_resampler_reset) {
+            if (player.resampler) {
+                src_reset((SRC_STATE*)player.resampler);
+            }
+            player.resample_leftover_count = 0;
+            time_stretch_reset(get_target_sample_rate());
+            stream_resampler_reset = false;
         }
 
         // Check if buffer needs more data (< 50% full)
@@ -1227,7 +1440,12 @@ static void* stream_thread_func(void* arg) {
             size_t decoded = stream_decoder_read(&player.stream_decoder,
                                                   decode_buffer, DECODE_CHUNK_FRAMES);
             if (decoded == 0) {
-                // Decoder has reached end of file
+                // Decoder has reached end of file. The time stretch gives out what it holds.
+                if (!player.stream_eof && time_stretch_active) {
+                    sonicFlushStream(time_stretch);
+                    time_stretch_drain(stretch_buffer);
+                    time_stretch_active = false;
+                }
                 player.stream_eof = true;
             } else {
                 // Resample chunk to target rate if needed
@@ -1235,19 +1453,20 @@ static void* stream_thread_func(void* arg) {
                 int dst_rate = get_target_sample_rate();
                 bool is_last = (player.stream_decoder.current_frame >= player.stream_decoder.total_frames);
 
-                size_t output_frames;
-                if (src_rate == dst_rate && player.playback_speed == 1.0f) {
-                    // No resampling needed
-                    output_frames = decoded;
-                    circular_buffer_write(&player.stream_buffer, decode_buffer, output_frames);
-                } else {
-                    // Resample
-                    output_frames = resample_chunk(decode_buffer, decoded,
-                                                   src_rate, dst_rate,
-                                                   resample_buffer, resample_buffer_size,
-                                                   (SRC_STATE*)player.resampler, is_last);
-                    circular_buffer_write(&player.stream_buffer, resample_buffer, output_frames);
+                int16_t* pcm = decode_buffer;
+                size_t frames = decoded;
+                if (src_rate != dst_rate) {
+                    frames = resample_chunk(decode_buffer, decoded,
+                                            src_rate, dst_rate,
+                                            resample_buffer, resample_buffer_size,
+                                            (SRC_STATE*)player.resampler, is_last);
+                    pcm = resample_buffer;
                 }
+
+                // Then the speed, with the pitch kept
+                float speed = player.playback_speed;
+                if (speed < 0.5f) speed = 1.0f;  // Safety fallback
+                time_stretch_write(pcm, frames, speed, stretch_buffer);
             }
         } else {
             // Buffer full enough, sleep briefly
@@ -1257,6 +1476,7 @@ static void* stream_thread_func(void* arg) {
 
     free(decode_buffer);
     free(resample_buffer);
+    free(stretch_buffer);
     return NULL;
 }
 
@@ -1291,8 +1511,8 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
 
             // Speaker processing: high-pass filter + soft limiter
             if (!bluetooth_audio_active && !usbdac_audio_active) {
-                int bass_hz = Settings_getBassFilterHz();
-                float limiter_thresh = Settings_getSoftLimiterThreshold();
+                int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
+                float limiter_thresh = speaker_soft_limiter_threshold();
                 if (bass_hz != speaker_hpf_last_hz) {
                     if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
                     speaker_hpf_last_hz = bass_hz;
@@ -1303,6 +1523,17 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
                     if (limiter_thresh > 0.0f)
                         out[i] = speaker_soft_limit(out[i], limiter_thresh);
                 }
+            }
+
+            // Copy to visualization buffer (non-blocking), as the branch of a
+            // file does. The spectrum reads this buffer and asks nothing about
+            // what made the samples.
+            if (samples_got > 0 && pthread_mutex_trylock(&ctx->vis_mutex) == 0) {
+                int vis_samples = samples_got;
+                if (vis_samples > 2048) vis_samples = 2048;
+                memcpy(ctx->vis_buffer, out, vis_samples * sizeof(int16_t));
+                ctx->vis_buffer_pos = vis_samples;
+                pthread_mutex_unlock(&ctx->vis_mutex);
             }
         } else {
             // CONNECTING or other states - output silence
@@ -1344,8 +1575,8 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
 
         // Speaker processing: high-pass filter + soft limiter
         if (!bluetooth_audio_active && !usbdac_audio_active) {
-            int bass_hz = Settings_getBassFilterHz();
-            float limiter_thresh = Settings_getSoftLimiterThreshold();
+            int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
+            float limiter_thresh = speaker_soft_limiter_threshold();
             if (bass_hz != speaker_hpf_last_hz) {
                 if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
                 speaker_hpf_last_hz = bass_hz;
@@ -1368,9 +1599,9 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
         }
 
         // Update position (account for playback speed)
-        audio_position_samples += samples_read;
         float spd = ctx->playback_speed > 0.0f ? ctx->playback_speed : 1.0f;
-        ctx->position_ms = (int64_t)((audio_position_samples * 1000.0 * spd) / current_sample_rate);
+        audio_position_samples += samples_read * (double)spd;
+        ctx->position_ms = (int64_t)((audio_position_samples * 1000.0) / current_sample_rate);
 
         // Check if track ended (decoder reached EOF or frame count)
         if ((ctx->stream_decoder.current_frame >= ctx->stream_decoder.total_frames || ctx->stream_eof) &&
@@ -1441,27 +1672,10 @@ int Player_init(void) {
         }
     }
 
-    // If Bluetooth audio is detected, set BlueALSA mixer to 100% for software volume control
-    if (audio_sink == AUDIO_SINK_BLUETOOTH) {
-        // Set all mixer controls that contain "A2DP" in their name to 100%
-        // This handles devices like "Galaxy Buds Live (4B23 A2DP" etc.
-        system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
-               "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
-               "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
-        // Initialize HID input monitoring for Bluetooth AVRCP buttons
-        Player_initUSBHID();
-    }
-
-    // If USB DAC is detected, set its mixer to 100% for software volume control
-    if (audio_sink == AUDIO_SINK_USBDAC) {
-        // USB DACs typically appear as card 1, set common mixer controls to 100%
-        // Different USB DACs use different control names (PCM, Master, Headset, etc.)
-        system("amixer -c 1 sset PCM 100% 2>/dev/null; "
-               "amixer -c 1 sset Master 100% 2>/dev/null; "
-               "amixer -c 1 sset Speaker 100% 2>/dev/null; "
-               "amixer -c 1 sset Headphone 100% 2>/dev/null; "
-               "amixer -c 1 sset Headset 100% 2>/dev/null");
-        // Initialize USB HID input monitoring for earphone buttons
+    // The remote of a Bluetooth headset (AVRCP) or of a USB DAC gives its buttons.
+    // The volume of these outputs is on their mixer, which NextUI sets
+    // (see Player_syncOutputVolume()).
+    if (audio_sink == AUDIO_SINK_BLUETOOTH || audio_sink == AUDIO_SINK_USBDAC) {
         Player_initUSBHID();
     }
 
@@ -1512,7 +1726,7 @@ int Player_init(void) {
     player.audio_initialized = true;
     current_sample_rate = have.freq;
     {
-        int bass_hz = Settings_getBassFilterHz();
+        int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
         if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
     }
 
@@ -1559,7 +1773,7 @@ static int reconfigure_audio_device(int new_sample_rate) {
 
     current_sample_rate = have.freq;
     {
-        int bass_hz = Settings_getBassFilterHz();
+        int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
         if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
     }
     return 0;
@@ -1570,6 +1784,9 @@ static void reopen_audio_device(void) {
     // Remember current playback state
     PlayerState prev_state = player.state;
 
+    // The stream thread may be in the resampler now, thus it resets it
+    stream_resampler_reset = true;
+
     // Pause and close existing device
     if (player.audio_device > 0) {
         SDL_PauseAudioDevice(player.audio_device, 1);
@@ -1577,8 +1794,25 @@ static void reopen_audio_device(void) {
         player.audio_device = 0;
     }
 
+    // alsa-lib reads ~/.asoundrc once and keeps it, thus the "default" device stays
+    // the old sink. Stop SDL audio, which also stops its ALSA hotplug thread, then let
+    // alsa-lib read its configuration again. The player is the only user of SDL audio,
+    // thus one quit stops it.
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    if (SDL_WasInit(SDL_INIT_AUDIO)) {
+        LOG_error("Audio: SDL audio still runs after the quit; the ALSA configuration stays\n");
+    } else {
+        alsa_reload_configuration();
+    }
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+        LOG_error("Audio: failed to restart SDL audio: %s\n", SDL_GetError());
+        return;
+    }
+
     // Get target sample rate for the new audio sink
     int target_rate = get_target_sample_rate();
+    LOG_info("Audio: reopen for the new sink: bluetooth %d, USB DAC %d, %d Hz\n",
+             bluetooth_audio_active, usbdac_audio_active, target_rate);
 
     // Reopen with target sample rate
     SDL_AudioSpec want, have;
@@ -1598,7 +1832,7 @@ static void reopen_audio_device(void) {
 
     current_sample_rate = have.freq;
     {
-        int bass_hz = Settings_getBassFilterHz();
+        int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
         if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
     }
 
@@ -1612,6 +1846,15 @@ static void reopen_audio_device(void) {
 static void audio_device_change_callback(int device_type, int event) {
     (void)device_type;
     (void)event;
+    audio_sink_changed_at = SDL_GetTicks();
+    audio_sink_changed = true;
+}
+
+void Player_handleAudioSinkChange(void) {
+    if (!audio_sink_changed || !player.audio_initialized) return;
+    if (SDL_GetTicks() - audio_sink_changed_at < AUDIO_SINK_SETTLE_MS) return;
+    audio_sink_changed = false;
+    audio_sink_generation++;
 
     // Re-check if Bluetooth is now active/inactive
     bool was_bluetooth = bluetooth_audio_active;
@@ -1639,11 +1882,8 @@ static void audio_device_change_callback(int device_type, int event) {
     }
 
     if (was_bluetooth != bluetooth_audio_active) {
-        // If Bluetooth just activated, set mixer to 100% and init HID
+        // If Bluetooth just activated, init HID
         if (bluetooth_audio_active) {
-            system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
-                   "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
-                   "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
             // Initialize HID input monitoring for Bluetooth AVRCP buttons
             Player_initUSBHID();
         } else if (!usbdac_audio_active) {
@@ -1652,13 +1892,7 @@ static void audio_device_change_callback(int device_type, int event) {
         }
     }
 
-    // If USB DAC just activated, set its mixer to 100%
     if (!was_usbdac && usbdac_audio_active) {
-        system("amixer -c 1 sset PCM 100% 2>/dev/null; "
-               "amixer -c 1 sset Master 100% 2>/dev/null; "
-               "amixer -c 1 sset Speaker 100% 2>/dev/null; "
-               "amixer -c 1 sset Headphone 100% 2>/dev/null; "
-               "amixer -c 1 sset Headset 100% 2>/dev/null");
         // Initialize USB HID input monitoring for earphone buttons
         Player_initUSBHID();
     } else if (was_usbdac && !usbdac_audio_active && !bluetooth_audio_active) {
@@ -1667,6 +1901,9 @@ static void audio_device_change_callback(int device_type, int event) {
     }
 
     reopen_audio_device();
+
+    // The mixer of the new output takes the system volume
+    Player_syncOutputVolume();
 }
 
 void Player_quit(void) {
@@ -1693,6 +1930,36 @@ void Player_quit(void) {
 
 // ============ METADATA PARSING ============
 
+// Decode an embedded image (JPEG, PNG) into the album art, if the track has none yet
+static void set_album_art(const void* data, size_t size) {
+    if (player.album_art || !data || size == 0) return;
+
+    SDL_RWops* rw = SDL_RWFromConstMem(data, (int)size);
+    if (!rw) return;
+    player.album_art = IMG_Load_RW(rw, 1);  // 1 = auto-close RWops
+}
+
+// Keep a lyrics tag of the track, if it has none yet. `len` is the text length in bytes.
+static void set_embedded_lyrics(const char* text, size_t len) {
+    if (player.lyrics || !text) return;
+
+    // One byte of ISO-8859-1 gives two bytes of UTF-8 at most
+    size_t size = len * 2 + 1;
+    char* lyrics = (char*)malloc(size);
+    if (!lyrics) return;
+
+    len = UTF8_fromUnknown(lyrics, size, (const uint8_t*)text, len);
+    while (len > 0 && (lyrics[len - 1] == '\n' || lyrics[len - 1] == '\r' ||
+                       lyrics[len - 1] == ' ')) len--;
+    if (len == 0) {
+        free(lyrics);
+        return;
+    }
+
+    lyrics[len] = '\0';
+    player.lyrics = lyrics;
+}
+
 // Helper: read syncsafe integer (ID3v2)
 static uint32_t read_syncsafe_int(const uint8_t* data) {
     return ((uint32_t)(data[0] & 0x7F) << 21) |
@@ -1707,110 +1974,43 @@ static uint32_t read_be32(const uint8_t* data) {
            ((uint32_t)data[2] << 8) | (uint32_t)data[3];
 }
 
-// Helper: copy string, trimming trailing spaces
+// Copy a tag text as UTF-8, with no trailing spaces
 static void copy_metadata_string(char* dest, const char* src, size_t max_len) {
     if (!src || !dest || max_len == 0) return;
 
-    size_t len = strlen(src);
-    if (len >= max_len) len = max_len - 1;
-
-    memcpy(dest, src, len);
-    dest[len] = '\0';
-
-    // Trim trailing spaces and nulls
-    while (len > 0 && (dest[len-1] == ' ' || dest[len-1] == '\0')) {
-        dest[--len] = '\0';
-    }
+    size_t len = UTF8_fromUnknown(dest, max_len, (const uint8_t*)src, strlen(src));
+    while (len > 0 && dest[len - 1] == ' ') dest[--len] = '\0';
 }
 
-// Helper: convert UTF-16LE to ASCII (for ID3v2 text frames)
-static void utf16le_to_ascii(char* dest, const uint8_t* src, size_t src_len, size_t max_len) {
-    if (!dest || !src || max_len == 0) return;
-
-    size_t j = 0;
-    for (size_t i = 0; i + 1 < src_len && j < max_len - 1; i += 2) {
-        // Get UTF-16LE character (low byte first)
-        uint16_t ch = src[i] | (src[i + 1] << 8);
-
-        // Only copy ASCII range characters
-        if (ch > 0 && ch < 128) {
-            dest[j++] = (char)ch;
-        } else if (ch >= 128 && ch < 256) {
-            // Latin-1 supplement - just use low byte
-            dest[j++] = (char)ch;
-        }
-        // Skip non-ASCII/non-Latin1 characters
-    }
-    dest[j] = '\0';
-}
-
-// Helper: convert UTF-16BE to ASCII (for ID3v2 text frames)
-static void utf16be_to_ascii(char* dest, const uint8_t* src, size_t src_len, size_t max_len) {
-    if (!dest || !src || max_len == 0) return;
-
-    size_t j = 0;
-    for (size_t i = 0; i + 1 < src_len && j < max_len - 1; i += 2) {
-        // Get UTF-16BE character (high byte first)
-        uint16_t ch = (src[i] << 8) | src[i + 1];
-
-        // Only copy ASCII range characters
-        if (ch > 0 && ch < 128) {
-            dest[j++] = (char)ch;
-        } else if (ch >= 128 && ch < 256) {
-            // Latin-1 supplement
-            dest[j++] = (char)ch;
-        }
-    }
-    dest[j] = '\0';
-}
-
-// Parse ID3v1 tag (at end of file, 128 bytes)
+// Parse ID3v1 tag (at end of file, 128 bytes) into the fields that are still empty
 static void parse_id3v1(const char* filepath) {
     FILE* f = fopen(filepath, "rb");
     if (!f) return;
 
-    // Seek to last 128 bytes
-    if (fseek(f, -128, SEEK_END) != 0) {
+    if (fseek(f, -ID3_V1_TAG_SIZE, SEEK_END) != 0) {
         fclose(f);
         return;
     }
 
-    uint8_t tag[128];
-    if (fread(tag, 1, 128, f) != 128) {
+    uint8_t tag[ID3_V1_TAG_SIZE];
+    if (fread(tag, 1, sizeof(tag), f) != sizeof(tag)) {
         fclose(f);
         return;
     }
     fclose(f);
 
-    // Check for "TAG" header
-    if (tag[0] != 'T' || tag[1] != 'A' || tag[2] != 'G') {
-        return;
+    if (player.track_info.title[0] == '\0') {
+        ID3_readV1Field(player.track_info.title, sizeof(player.track_info.title), tag,
+                        ID3_V1_TITLE);
     }
-
-    // ID3v1 layout: TAG(3) + Title(30) + Artist(30) + Album(30) + Year(4) + Comment(30) + Genre(1)
-    char buf[31];
-
-    // Title (bytes 3-32)
-    if (player.track_info.title[0] == '\0' || strstr(player.track_info.title, ".") != NULL) {
-        memcpy(buf, &tag[3], 30);
-        buf[30] = '\0';
-        copy_metadata_string(player.track_info.title, buf, sizeof(player.track_info.title));
-    }
-
-    // Artist (bytes 33-62)
     if (player.track_info.artist[0] == '\0') {
-        memcpy(buf, &tag[33], 30);
-        buf[30] = '\0';
-        copy_metadata_string(player.track_info.artist, buf, sizeof(player.track_info.artist));
+        ID3_readV1Field(player.track_info.artist, sizeof(player.track_info.artist), tag,
+                        ID3_V1_ARTIST);
     }
-
-    // Album (bytes 63-92)
     if (player.track_info.album[0] == '\0') {
-        memcpy(buf, &tag[63], 30);
-        buf[30] = '\0';
-        copy_metadata_string(player.track_info.album, buf, sizeof(player.track_info.album));
+        ID3_readV1Field(player.track_info.album, sizeof(player.track_info.album), tag,
+                        ID3_V1_ALBUM);
     }
-
 }
 
 // Parse ID3v2 tag (at beginning of file)
@@ -1837,7 +2037,7 @@ static void parse_id3v2(const char* filepath) {
 
 
     // Read entire tag
-    uint8_t* tag_data = malloc(tag_size);
+    uint8_t* tag_data = (uint8_t*)malloc(tag_size);
     if (!tag_data) {
         fclose(f);
         return;
@@ -1871,45 +2071,14 @@ static void parse_id3v2(const char* filepath) {
         // Skip flags
         pos += 10;
 
-        if (frame_size == 0 || pos + frame_size > tag_size) break;
+        // A subtraction, because a sum with a large frame size can wrap
+        if (frame_size == 0 || frame_size > tag_size - pos) break;
 
         // Process text frames (TIT2, TPE1, TALB, etc.)
         if (frame_id[0] == 'T' && frame_size > 1) {
             const uint8_t* frame_data = &tag_data[pos];
-            uint8_t encoding = frame_data[0];
-            const uint8_t* text_data = &frame_data[1];
-            size_t text_len = frame_size - 1;
-
             char temp[256];
-            temp[0] = '\0';
-
-            // Handle different encodings
-            // 0 = ISO-8859-1, 1 = UTF-16 with BOM, 2 = UTF-16BE, 3 = UTF-8
-            if (encoding == 0 || encoding == 3) {
-                // ISO-8859-1 or UTF-8: copy directly
-                size_t copy_len = text_len < 255 ? text_len : 255;
-                memcpy(temp, text_data, copy_len);
-                temp[copy_len] = '\0';
-            } else if (encoding == 1) {
-                // UTF-16 with BOM
-                if (text_len >= 2) {
-                    bool is_le = (text_data[0] == 0xFF && text_data[1] == 0xFE);
-                    bool is_be = (text_data[0] == 0xFE && text_data[1] == 0xFF);
-                    if (is_le || is_be) {
-                        text_data += 2;
-                        text_len -= 2;
-                    }
-                    if (is_be) {
-                        utf16be_to_ascii(temp, text_data, text_len, sizeof(temp));
-                    } else {
-                        // Default to LE
-                        utf16le_to_ascii(temp, text_data, text_len, sizeof(temp));
-                    }
-                }
-            } else if (encoding == 2) {
-                // UTF-16BE without BOM
-                utf16be_to_ascii(temp, text_data, text_len, sizeof(temp));
-            }
+            ID3_textToUtf8(temp, sizeof(temp), frame_data[0], &frame_data[1], frame_size - 1);
 
             // Assign to appropriate field
             if (strcmp(frame_id, "TIT2") == 0 && temp[0]) {  // Title
@@ -1918,6 +2087,29 @@ static void parse_id3v2(const char* filepath) {
                 copy_metadata_string(player.track_info.artist, temp, sizeof(player.track_info.artist));
             } else if (strcmp(frame_id, "TALB") == 0 && temp[0]) {  // Album
                 copy_metadata_string(player.track_info.album, temp, sizeof(player.track_info.album));
+            }
+        }
+        // Process USLT frame (unsynced lyrics): encoding, language(3), description, text
+        else if (strcmp(frame_id, "USLT") == 0 && frame_size > 4 && player.lyrics == NULL) {
+            const uint8_t* frame_data = &tag_data[pos];
+            uint8_t encoding = frame_data[0];
+            size_t offset = 4;
+            offset += ID3_skipText(encoding, &frame_data[offset], frame_size - offset);
+
+            if (offset < frame_size) {
+                const uint8_t* text = &frame_data[offset];
+                size_t text_len = frame_size - offset;
+
+                // One UTF-16 code unit gives three bytes of UTF-8 at most, and one byte
+                // of the other encodings gives two
+                bool utf16 = (encoding == 1 || encoding == 2);
+                size_t size = utf16 ? text_len / 2 * 3 + 1 : text_len * 2 + 1;
+                char* converted = (char*)malloc(size);
+                if (converted) {
+                    size_t length = ID3_textToUtf8(converted, size, encoding, text, text_len);
+                    set_embedded_lyrics(converted, length);
+                    free(converted);
+                }
             }
         }
         // Process APIC frame (album art) - only if we don't already have art
@@ -1934,21 +2126,7 @@ static void parse_id3v2(const char* filepath) {
                 uint8_t pic_type = frame_data[offset];
                 offset++;
 
-                // Skip description (null-terminated, encoding-dependent)
-                if (encoding == 1 || encoding == 2) {
-                    // UTF-16: look for double null
-                    while (offset + 1 < frame_size) {
-                        if (frame_data[offset] == 0 && frame_data[offset + 1] == 0) {
-                            offset += 2;
-                            break;
-                        }
-                        offset++;
-                    }
-                } else {
-                    // ISO-8859-1 or UTF-8: single null
-                    while (offset < frame_size && frame_data[offset] != '\0') offset++;
-                    offset++;
-                }
+                offset += ID3_skipText(encoding, &frame_data[offset], frame_size - offset);
 
                 // Now frame_data + offset points to the image data
                 if (offset < frame_size) {
@@ -1986,45 +2164,98 @@ static void parse_mp3_metadata(const char* filepath) {
     parse_id3v2(filepath);
 
     // Fall back to ID3v1 for any missing fields
-    if (player.track_info.artist[0] == '\0' || player.track_info.album[0] == '\0') {
+    if (player.track_info.title[0] == '\0' || player.track_info.artist[0] == '\0' ||
+        player.track_info.album[0] == '\0') {
         parse_id3v1(filepath);
     }
 }
 
-// Parse M4A metadata from the already-opened decoder
-static void parse_m4a_metadata(void) {
-    if (player.stream_decoder.format != AUDIO_FORMAT_M4A || !player.stream_decoder.decoder) {
-        return;
+// Decode base64 in place. Returns the number of bytes, or 0 if the text is not base64.
+static size_t base64_decode_inplace(char* text) {
+    size_t out = 0;
+    uint32_t acc = 0;
+    int bits = 0;
+    for (const char* c = text; *c && *c != '='; c++) {
+        int v;
+        if (*c >= 'A' && *c <= 'Z') v = *c - 'A';
+        else if (*c >= 'a' && *c <= 'z') v = *c - 'a' + 26;
+        else if (*c >= '0' && *c <= '9') v = *c - '0' + 52;
+        else if (*c == '+') v = 62;
+        else if (*c == '/') v = 63;
+        else return 0;
+
+        acc = (acc << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            // Each output byte is written behind the read position, thus in place is safe
+            text[out++] = (char)((acc >> bits) & 0xFF);
+        }
+    }
+    return out;
+}
+
+// Load the image of a FLAC picture structure: the PICTURE block of FLAC, and the
+// decoded METADATA_BLOCK_PICTURE comment of Ogg Vorbis and Opus. All fields are big-endian:
+// type, MIME length, MIME, description length, description, width, height, depth,
+// colors, data length, data.
+static void parse_flac_picture(const uint8_t* p, size_t size) {
+    size_t pos = 4;  // picture type
+
+    for (int i = 0; i < 2; i++) {  // MIME type, then description
+        if (pos + 4 > size) return;
+        uint32_t len = read_be32(&p[pos]);
+        pos += 4;
+        if (len > size - pos) return;
+        pos += len;
     }
 
-    M4ADecoder* m4a = (M4ADecoder*)player.stream_decoder.decoder;
+    pos += 16;  // width, height, depth, colors
+    if (pos + 4 > size) return;
+    uint32_t data_len = read_be32(&p[pos]);
+    pos += 4;
+    if (data_len > size - pos) return;
+
+    set_album_art(&p[pos], data_len);
+}
+
+// Parse M4A metadata (iTunes-style tags in the MP4 container)
+static void parse_m4a_metadata(const char* filepath) {
+    FILE* f = fopen(filepath, "rb");
+    if (!f) return;
+
+    fseek(f, 0, SEEK_END);
+    int64_t file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    // MP4D_close frees and clears each pointer, so it is safe after a failed MP4D_open too
+    MP4D_demux_t mp4;
+    memset(&mp4, 0, sizeof(mp4));
+    MP4D_open(&mp4, m4a_read_callback, f, file_size);
 
     // Copy metadata from minimp4's parsed tags
-    if (m4a->mp4.tag.title && m4a->mp4.tag.title[0]) {
-        copy_metadata_string(player.track_info.title, (const char*)m4a->mp4.tag.title,
+    if (mp4.tag.title && mp4.tag.title[0]) {
+        copy_metadata_string(player.track_info.title, (const char*)mp4.tag.title,
                            sizeof(player.track_info.title));
     }
 
-    if (m4a->mp4.tag.artist && m4a->mp4.tag.artist[0]) {
-        copy_metadata_string(player.track_info.artist, (const char*)m4a->mp4.tag.artist,
+    if (mp4.tag.artist && mp4.tag.artist[0]) {
+        copy_metadata_string(player.track_info.artist, (const char*)mp4.tag.artist,
                            sizeof(player.track_info.artist));
     }
 
-    if (m4a->mp4.tag.album && m4a->mp4.tag.album[0]) {
-        copy_metadata_string(player.track_info.album, (const char*)m4a->mp4.tag.album,
+    if (mp4.tag.album && mp4.tag.album[0]) {
+        copy_metadata_string(player.track_info.album, (const char*)mp4.tag.album,
                            sizeof(player.track_info.album));
     }
 
+    if (mp4.tag.lyrics) set_embedded_lyrics((const char*)mp4.tag.lyrics, strlen((const char*)mp4.tag.lyrics));
+
     // Load cover art if present
-    if (m4a->mp4.tag.cover && m4a->mp4.tag.cover_size > 0 && player.album_art == NULL) {
-        SDL_RWops* rw = SDL_RWFromConstMem(m4a->mp4.tag.cover, m4a->mp4.tag.cover_size);
-        if (rw) {
-            SDL_Surface* art = IMG_Load_RW(rw, 1);  // 1 = auto-close RWops
-            if (art) {
-                player.album_art = art;
-            }
-        }
-    }
+    if (mp4.tag.cover) set_album_art(mp4.tag.cover, mp4.tag.cover_size);
+
+    MP4D_close(&mp4);
+    fclose(f);
 }
 
 // Parse Vorbis comments (for OGG and FLAC)
@@ -2044,6 +2275,17 @@ static void parse_vorbis_comment(const char* comment) {
         copy_metadata_string(player.track_info.artist, value, sizeof(player.track_info.artist));
     } else if (strncasecmp(comment, "ALBUM", key_len) == 0 && key_len == 5) {
         copy_metadata_string(player.track_info.album, value, sizeof(player.track_info.album));
+    } else if ((key_len == 6 && strncasecmp(comment, "LYRICS", key_len) == 0) ||
+               (key_len == 14 && strncasecmp(comment, "UNSYNCEDLYRICS", key_len) == 0)) {
+        set_embedded_lyrics(value, strlen(value));
+    } else if (key_len == 22 && strncasecmp(comment, "METADATA_BLOCK_PICTURE", key_len) == 0 &&
+               player.album_art == NULL) {
+        // A base64 FLAC picture structure
+        char* bytes = strdup(value);
+        if (!bytes) return;
+        size_t size = base64_decode_inplace(bytes);
+        parse_flac_picture((const uint8_t*)bytes, size);
+        free(bytes);
     }
 }
 
@@ -2051,11 +2293,17 @@ static void parse_vorbis_comment(const char* comment) {
 static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata) {
     (void)pUserData;
 
+    if (pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_PICTURE) {
+        // dr_flac has already read the fields; pPictureData is NULL if it could not allocate
+        set_album_art(pMetadata->data.picture.pPictureData, pMetadata->data.picture.pictureDataSize);
+        return;
+    }
+
     if (pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_VORBIS_COMMENT) {
         // Parse Vorbis comments
         const drflac_vorbis_comment_iterator* comments = NULL;
         uint32_t commentCount = pMetadata->data.vorbis_comment.commentCount;
-        const char* pComments = pMetadata->data.vorbis_comment.pComments;
+        const char* pComments = (const char*)pMetadata->data.vorbis_comment.pComments;
 
         // Iterate through comments
         for (uint32_t i = 0; i < commentCount; i++) {
@@ -2066,7 +2314,7 @@ static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata) 
                 pComments += 4;
 
                 // Create null-terminated copy
-                char* comment = malloc(commentLength + 1);
+                char* comment = (char*)malloc(commentLength + 1);
                 if (comment) {
                     memcpy(comment, pComments, commentLength);
                     comment[commentLength] = '\0';
@@ -2077,6 +2325,100 @@ static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata) 
                 pComments += commentLength;
             }
         }
+    }
+}
+
+// Parse FLAC metadata (Vorbis comment block)
+static void parse_flac_metadata(const char* filepath) {
+    // dr_flac gives the metadata blocks only to a callback while it opens the file
+    drflac* flac = drflac_open_file_with_metadata(filepath, flac_metadata_callback, NULL, NULL);
+    if (flac) drflac_close(flac);
+}
+
+// Parse OGG metadata (Vorbis comment tags)
+static void parse_ogg_metadata(const char* filepath) {
+    int error;
+    stb_vorbis* vorbis = stb_vorbis_open_filename(filepath, &error, NULL);
+    if (!vorbis) return;
+
+    stb_vorbis_comment comments = stb_vorbis_get_comment(vorbis);
+    for (int i = 0; i < comments.comment_list_length; i++)
+        parse_vorbis_comment(comments.comment_list[i]);
+
+    stb_vorbis_close(vorbis);
+}
+
+// Parse Opus metadata (Vorbis comment tags)
+static void parse_opus_metadata(const char* filepath) {
+    // A partial open reads only the headers, and the tags of the first link are available
+    int error;
+    OggOpusFile* of = op_test_file(filepath, &error);
+    if (!of) return;
+
+    const OpusTags* tags = op_tags(of, 0);
+    if (tags) {
+        for (int i = 0; i < tags->comments; i++)
+            parse_vorbis_comment(tags->user_comments[i]);
+    }
+
+    op_free(of);
+}
+
+// Parse WAV metadata (RIFF LIST/INFO chunk)
+static void parse_wav_metadata(const char* filepath) {
+    drwav wav;
+    if (!drwav_init_file_with_metadata(&wav, filepath, 0, NULL)) return;
+
+    for (drwav_uint32 i = 0; i < wav.metadataCount; i++) {
+        const drwav_metadata* md = &wav.pMetadata[i];
+        char* dest;
+        size_t dest_size;
+        if (md->type == drwav_metadata_type_list_info_title) {
+            dest = player.track_info.title;
+            dest_size = sizeof(player.track_info.title);
+        } else if (md->type == drwav_metadata_type_list_info_artist) {
+            dest = player.track_info.artist;
+            dest_size = sizeof(player.track_info.artist);
+        } else if (md->type == drwav_metadata_type_list_info_album) {
+            dest = player.track_info.album;
+            dest_size = sizeof(player.track_info.album);
+        } else {
+            continue;
+        }
+
+        // infoText is the union member only for the list_info types above
+        const char* text = md->data.infoText.pString;
+        if (text && text[0]) copy_metadata_string(dest, text, dest_size);
+    }
+
+    drwav_uninit(&wav);
+}
+
+// Read the tags of a file into track_info, before its decoder opens
+static void parse_metadata(AudioFormat format, const char* filepath) {
+    switch (format) {
+        case AUDIO_FORMAT_MP3:
+        case AUDIO_FORMAT_AAC:  // raw ADTS has no tag format of its own; taggers add ID3 as for MP3
+            parse_mp3_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_WAV:
+            parse_wav_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_FLAC:
+            parse_flac_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_OGG:
+            parse_ogg_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_OPUS:
+            parse_opus_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_M4A:
+            parse_m4a_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_UNKNOWN:
+        case AUDIO_FORMAT_MOD:
+            break;
     }
 }
 
@@ -2127,11 +2469,11 @@ static int load_streaming(const char* filepath) {
         return -1;
     }
 
-    // Initialize resampler for streaming
-    int src_rate = player.stream_decoder.source_sample_rate;
+    // Initialize resampler for streaming. Each track gets one, also where the
+    // rates agree now: a change of the output (Bluetooth) or of the speed makes
+    // the stream thread resample in the middle of the track.
     int dst_rate = get_target_sample_rate();
-
-    if (src_rate != dst_rate) {
+    {
         int error;
         player.resampler = src_new(SRC_SINC_FASTEST, AUDIO_CHANNELS, &error);
         if (!player.resampler) {
@@ -2141,6 +2483,7 @@ static int load_streaming(const char* filepath) {
             return -1;
         }
     }
+    time_stretch_reset(dst_rate);
 
     // Set track info
     player.track_info.sample_rate = dst_rate;  // Output rate
@@ -2171,6 +2514,22 @@ static int load_streaming(const char* filepath) {
     return 0;
 }
 
+// Use the filename without its extension as the title, when no tag gave one
+static void set_title_from_filename(const char* filepath) {
+    pthread_mutex_lock(&player.mutex);
+
+    if (player.track_info.title[0] == '\0') {
+        const char* filename = strrchr(filepath, '/');
+        if (filename) filename++; else filename = filepath;
+        strncpy(player.track_info.title, filename, sizeof(player.track_info.title) - 1);
+
+        char* ext = strrchr(player.track_info.title, '.');
+        if (ext) *ext = '\0';
+    }
+
+    pthread_mutex_unlock(&player.mutex);
+}
+
 int Player_load(const char* filepath) {
     if (!filepath || !player.audio_initialized) return -1;
 
@@ -2184,16 +2543,8 @@ int Player_load(const char* filepath) {
     // Store filename
     strncpy(player.current_file, filepath, sizeof(player.current_file) - 1);
 
-    // Extract title from filename
-    const char* filename = strrchr(filepath, '/');
-    if (filename) filename++; else filename = filepath;
-    strncpy(player.track_info.title, filename, sizeof(player.track_info.title) - 1);
-
-    // Remove extension from title
-    char* ext = strrchr(player.track_info.title, '.');
-    if (ext) *ext = '\0';
-
-    // Clear artist/album
+    // Each tag reader sees an empty field for each field that no tag gave
+    player.track_info.title[0] = '\0';
     player.track_info.artist[0] = '\0';
     player.track_info.album[0] = '\0';
 
@@ -2205,27 +2556,11 @@ int Player_load(const char* filepath) {
         format == AUDIO_FORMAT_FLAC || format == AUDIO_FORMAT_OGG ||
         format == AUDIO_FORMAT_M4A || format == AUDIO_FORMAT_AAC ||
         format == AUDIO_FORMAT_OPUS) {
+        parse_metadata(format, filepath);
+        set_title_from_filename(filepath);
         result = load_streaming(filepath);
 
-        // Parse metadata for MP3
-        if (result == 0 && format == AUDIO_FORMAT_MP3) {
-            parse_mp3_metadata(filepath);
-        }
-        // Parse metadata for M4A
-        if (result == 0 && format == AUDIO_FORMAT_M4A) {
-            parse_m4a_metadata();
-        }
-        // Parse metadata for Opus (uses Vorbis comment tags)
-        if (result == 0 && format == AUDIO_FORMAT_OPUS) {
-            OggOpusFile* of = (OggOpusFile*)player.stream_decoder.decoder;
-            const OpusTags* tags = op_tags(of, -1);
-            if (tags) {
-                for (int i = 0; i < tags->comments; i++)
-                    parse_vorbis_comment(tags->user_comments[i]);
-            }
-        }
-
-        // Album art fetch moved to module_player.c (after Player_play)
+        // The music session fetches the album art after Player_play()
         // to avoid blocking playback start
     } else {
         LOG_error("Unsupported format for streaming: %s\n", filepath);
@@ -2291,6 +2626,11 @@ void Player_stop(void) {
             src_delete((SRC_STATE*)player.resampler);
             player.resampler = NULL;
         }
+        if (time_stretch) {
+            sonicDestroyStream(time_stretch);
+            time_stretch = NULL;
+        }
+        time_stretch_active = false;
         // Free resampler leftover buffer
         if (player.resample_leftover) {
             free(player.resample_leftover);
@@ -2312,6 +2652,9 @@ void Player_stop(void) {
         SDL_FreeSurface(player.album_art);
         player.album_art = NULL;
     }
+
+    free(player.lyrics);
+    player.lyrics = NULL;
 
     // Clear any internet-fetched album art
     album_art_clear();
@@ -2355,6 +2698,14 @@ bool Player_resume(void) {
     return player.stream_seeking;
 }
 
+void Player_syncOutputVolume(void) {
+    // NextUI keeps the system volume on the mixer of each output: the speaker, the
+    // A2DP mixer of a Bluetooth headset and a USB DAC (SetRawVolume() of msettings).
+    // Thus the player plays at full scale, and gives the volume to the new mixer.
+    Player_setVolume(1.0f);
+    SetVolume(GetVolume());
+}
+
 void Player_setVolume(float volume) {
     if (volume < 0.0f) volume = 0.0f;
     if (volume > 1.0f) volume = 1.0f;
@@ -2393,8 +2744,16 @@ const TrackInfo* Player_getTrackInfo(void) {
     return &player.track_info;
 }
 
+unsigned Player_getAudioSinkGeneration(void) {
+    return audio_sink_generation;
+}
+
 const char* Player_getCurrentFile(void) {
     return player.current_file;
+}
+
+const char* Player_getEmbeddedLyrics(void) {
+    return player.lyrics;
 }
 
 int Player_getVisBuffer(int16_t* buffer, int max_samples) {
@@ -2406,6 +2765,10 @@ int Player_getVisBuffer(int16_t* buffer, int max_samples) {
     if (samples_to_copy > 0) {
         memcpy(buffer, player.vis_buffer, samples_to_copy * sizeof(int16_t));
     }
+    // The read takes the samples. A caller that gets nothing thus knows that the
+    // audio callback wrote nothing since the last read, whatever the reason: a
+    // pause, a stop, an empty buffer or the end of a track.
+    player.vis_buffer_pos = 0;
     pthread_mutex_unlock(&player.vis_mutex);
 
     return samples_to_copy;
@@ -2451,6 +2814,13 @@ bool Player_isUSBDACActive(void) {
 
 // USB HID input monitoring
 static int usb_hid_fd = -1;
+
+// The remote of a headset can appear after its audio: BlueZ creates the AVRCP input
+// device a moment after the audio stream. Thus while Bluetooth or a USB DAC is the
+// output and no remote is open, Player_pollUSBHID() looks again at this interval.
+#define HID_RETRY_MS 1000
+static uint32_t hid_retry_at = 0;
+static bool hid_missing_logged = false;
 
 // Find USB audio HID device by scanning /proc/bus/input/devices
 static int find_audio_hid_device(char* event_path, size_t path_size, bool find_bluetooth) {
@@ -2542,21 +2912,34 @@ void Player_initUSBHID(void) {
         if (find_audio_hid_device(event_path, sizeof(event_path), true) == 0) {
             usb_hid_fd = open(event_path, O_RDONLY | O_NONBLOCK);
             if (usb_hid_fd >= 0) {
+                LOG_info("HID: Bluetooth remote at %s\n", event_path);
+                hid_missing_logged = false;
                 return;
             }
+        }
+        if (!hid_missing_logged) {
+            LOG_info("HID: no Bluetooth remote yet, looking again each %d ms\n", HID_RETRY_MS);
+            hid_missing_logged = true;
         }
     }
 }
 
 USBHIDEvent Player_pollUSBHID(void) {
     if (usb_hid_fd < 0) {
-        return USB_HID_EVENT_NONE;
+        uint32_t now = SDL_GetTicks();
+        if ((bluetooth_audio_active || usbdac_audio_active) && (int32_t)(now - hid_retry_at) >= 0) {
+            hid_retry_at = now + HID_RETRY_MS;
+            Player_initUSBHID();
+        }
+        if (usb_hid_fd < 0) return USB_HID_EVENT_NONE;
     }
 
     struct input_event_raw ev;
-    while (read(usb_hid_fd, &ev, sizeof(ev)) == sizeof(ev)) {
+    ssize_t got;
+    while ((got = read(usb_hid_fd, &ev, sizeof(ev))) == sizeof(ev)) {
         // Only handle key press events (value=1), ignore release (0) and repeat (2)
         if (ev.type == EV_KEY && ev.value == 1) {
+            LOG_debug("HID: key %d\n", ev.code);
             switch (ev.code) {
                 case KEY_VOLUMEUP:
                     return USB_HID_EVENT_VOLUME_UP;
@@ -2572,6 +2955,12 @@ USBHIDEvent Player_pollUSBHID(void) {
                     return USB_HID_EVENT_PREV_TRACK;
             }
         }
+    }
+
+    // The remote went away (a disconnect): close it, and the retry finds the next one
+    if (got < 0 && errno == ENODEV) {
+        LOG_info("HID: remote went away\n");
+        Player_quitUSBHID();
     }
 
     return USB_HID_EVENT_NONE;

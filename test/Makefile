@@ -1,0 +1,591 @@
+# Host-side unit tests for pure-logic modules (no SDL/hardware).
+# Run from the repo root with:  make -C test        (build + run)
+#                               make -C test clean
+#
+# Tests compile the REAL source under test with the host cc. A module only
+# qualifies for a test here if its translation unit has no platform includes -
+# that constraint is what keeps this harness stub-free and sub-second.
+#
+# ui_theme_utils.c is the one exception: it includes SDL for the SDL_Color type
+# only, and calls no SDL function, thus the test needs the SDL headers but no
+# SDL library. A color type of its own would need no header, but two color
+# structs in one codebase cost a reader more than one include costs the build.
+#
+# list_nav.c is the model: pure integer cursor logic, with the pad read split
+# out into list_nav_pad.c so api.h never reaches the tested TU. Its declaration
+# remains in list_nav.h because ListNavInput is part of that public API. toast_state.c
+# follows it, with the drawing left in toast.c and the clock passed in.
+#
+# keyboard_map.c qualifies the same way: the key tables and the pair lookups are
+# plain C, with the font probe passed in as a callback so SDL_ttf stays in
+# ui_keyboard.c.
+#
+# spectrum_ceiling.c is the same shape as list_nav.c: the rise of the ceiling is
+# float arithmetic, with the FFT and the paint left in spectrum.c. It declares
+# itself in spectrum.h, which holds no platform include.
+#
+# stopwatch.cpp is the same shape as spectrum_ceiling.c: a count of time, with the
+# clock passed in. It holds the C functions and the C++ class of stopwatch.h.
+#
+# screen_title.c is the same shape as toast_state.c: the text of a title and
+# where its marquee is, with the clock and the measured widths passed in and the
+# paint left in ui_utils.c.
+#
+# frame_state.c is the record of what a frame changed: two flags in, and the
+# presentation that the frame needs out. The calls of the platform stay in
+# module_common.c.
+#
+# lyric_window.c is the timing and the layout of the lyric window: the lines and
+# the position come in, and the current index and the rows come out. It reads
+# the line type from lyrics.h, which holds no platform include.
+#
+# mp3_seek.c reads the header frame of an MP3 file through a callback, thus its
+# test gives it synthetic files in memory.
+#
+# seek_scan.c is the same shape as toast_state.c: the buttons and the clock come
+# in, and the seek and the position to show come out.
+#
+# input/input_driver.cpp, input/button_detector.cpp, input/common_button_handler.cpp and
+# input/input_manager.cpp are C++ and the same shape as seek_scan.c: the pad masks, the raw
+# events and the clock come in, and the events go out to a listener. The pad read stays in
+# input/input_driver_nextui.cpp, and power management in
+# input/common_button_handler_nextui.cpp.
+#
+# ui/view/ui_compositor.cpp and ui/view/ui_view.cpp compose bitmaps on SDL surfaces and call
+# ui_layers.c for the layer. The test links SDL for the surfaces only, and gives a test double
+# of ui_layers.c, thus it needs no platform.
+#
+# file_utils.c qualifies for a different reason: it talks to the filesystem, but
+# only through libc, so it needs no stubs either. Its test does create files -
+# under its own mk_tempdir(), and removes them again.
+
+CC      ?= cc
+CFLAGS  ?= -std=gnu99 -O0 -g -Wall -Wextra
+CXXFLAGS ?= -std=c++23 -O0 -g -Wall -Wextra -fno-exceptions -fno-rtti
+# C++ compiles with the Zig of the host, the compiler of the app.
+ZIG_CPU    := $(shell uname -m | sed -e s/arm64/aarch64/ -e s/amd64/x86_64/)
+ZIG_SYSTEM := $(if $(filter Darwin,$(shell uname -s)),macos,linux)
+ZIG        ?= ../deps/zig/$(ZIG_CPU)-$(ZIG_SYSTEM)/zig
+# zig-c++ runs `zig c++`, under a name that an IDE knows (see src/Makefile).
+CXX         = $(dir $(ZIG))zig-c++
+export ZIG_GLOBAL_CACHE_DIR = $(CURDIR)/bin/zig-cache
+export ZIG_LOCAL_CACHE_DIR  = $(CURDIR)/bin/zig-cache
+INC      = -I../src $(shell pkg-config --cflags sdl2)
+
+SRC      = ../src
+BIN      = bin
+
+TESTS    = $(BIN)/test_list_nav $(BIN)/test_toast_state \
+           $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
+           $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
+           $(BIN)/test_stopwatch $(BIN)/test_error \
+           $(BIN)/test_frame_state \
+           $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings \
+           $(BIN)/test_seek_scan $(BIN)/test_mp3_seek
+TESTS   += $(BIN)/test_id3
+TESTS   += $(BIN)/test_radio_hls
+TESTS   += $(BIN)/test_radio_step
+TESTS   += $(BIN)/test_icy
+TESTS   += $(BIN)/test_background
+TESTS   += $(BIN)/test_playlist_m3u
+TESTS   += $(BIN)/test_resume
+TESTS   += $(BIN)/test_filedb
+TESTS   += $(BIN)/test_playlist
+TESTS   += $(BIN)/test_input_events
+TESTS   += $(BIN)/test_page_context
+TESTS   += $(BIN)/test_activity_clock
+TESTS   += $(BIN)/test_page_stack
+TESTS   += $(BIN)/test_ui_compositor
+TESTS   += $(BIN)/test_source_gradient
+TESTS   += $(BIN)/test_rounded_rect
+TESTS   += $(BIN)/test_art_glyph
+TESTS   += $(BIN)/test_detail_panel_layout
+TESTS   += $(BIN)/test_browser_nav
+TESTS   += $(BIN)/test_options_panel_layout
+TESTS   += $(BIN)/test_sleep_timer
+TESTS   += $(BIN)/test_music_player_layout
+TESTS   += $(BIN)/test_radio_favourites
+TESTS   += $(BIN)/test_radio_station_name
+TESTS   += $(BIN)/test_radio_search
+TESTS   += $(BIN)/test_radio_player_state
+TESTS   += $(BIN)/test_podcast_format
+TESTS   += $(BIN)/test_podcast_rss
+TESTS   += $(BIN)/test_podcast_import_parse
+
+# ui_utils.c draws, thus it includes the platform and this target cannot follow
+# the rule above. The test compiles ui_utils.c itself, thus it always runs the
+# source of the tree, and it takes the rest of the symbols from the objects that
+# the desktop build already made. Run ./dev build desktop first.
+# The desktop build makes one kind at a time and keeps each kind apart. The tests
+# link the kind that ./dev build makes by default. Pass KIND=release to link the
+# other one.
+KIND ?= debug
+DESKTOP_BUILD = ../src/build/$(KIND)/desktop
+DESKTOP_OBJ = $(DESKTOP_BUILD)/obj
+TESTS   += $(BIN)/test_ui_utils
+
+# ui_fonts.c reads the theme of the platform, thus its test links the objects of
+# the desktop build as the test above does. It links ui_fonts.o in place of a
+# copy of its own, because `desktop-objs` rebuilds that object from the source of
+# the tree.
+TESTS   += $(BIN)/test_ui_fonts
+
+# The views draw with SDL_ttf and the assets of the platform, thus their test links the
+# objects of the desktop build as the three above do. It gives a test double of ui_layers.c.
+TESTS   += $(BIN)/test_ui_views
+TESTS   += $(BIN)/test_list_screen_controller
+# The Wi-Fi dialog links the same objects, with test doubles of wifi.c and toast.c in place of theirs.
+TESTS   += $(BIN)/test_wifi_dialog
+
+TESTS   += $(BIN)/test_version
+
+# selfupdate_install.c deletes files, thus its test works in directories of its own under
+# TEST_TEMP_DIR, as the test of file_utils.c does.
+TESTS   += $(BIN)/test_selfupdate_install
+
+.PHONY: all build check headers run clean
+all: run
+
+# Compile every test binary and run none. An IDE indexes the tests through it.
+build: $(TESTS)
+
+check: headers
+	./check_color_calls.py
+	./check_present_calls.py
+
+# Each .h of the app compiles alone, as C and as C++, and has the extern "C"
+# block that gives its functions C linkage in C++ code. A .hpp holds C++ only:
+# it compiles alone as C++ and has no extern "C" block. The shim that the build
+# forces into NextUI's config.c is not an interface, thus it is not checked. A
+# check runs again only after a change of a file that the header includes.
+HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h $(SRC)/ui/*.h))
+CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp $(SRC)/ui/page/*.hpp $(SRC)/ui/view/*.hpp)
+HEADER_STAMPS = $(patsubst $(SRC)/%.h,$(BIN)/headers/%.ok,$(HEADERS)) \
+                $(patsubst $(SRC)/%.hpp,$(BIN)/headers/%.hpp.ok,$(CXX_HEADERS))
+HEADER_INC    = $(INC) $(DESKTOP_INC) \
+                -I$(SRC)/audio -I$(SRC)/include -I$(SRC)/include/mbedtls_lib \
+                -I$(SRC)/include/yxml -I$(SRC)/include/libogg/include \
+                -I$(SRC)/include/libopus/include -I$(SRC)/include/opusfile/include \
+                -I../NextUI/workspace/all/minarch/libretro-common/include
+
+# The checks are independent and slow, thus they run in parallel. Zig does not
+# compile stdin, and it fails on -fsyntax-only, thus the C++ check compiles a
+# file that includes the header into an object.
+headers:
+	@$(MAKE) --no-print-directory -j$$(nproc 2>/dev/null || sysctl -n hw.ncpu) header-stamps
+
+.PHONY: header-stamps
+header-stamps: $(HEADER_STAMPS)
+
+$(BIN)/headers/%.ok: $(SRC)/%.h
+	@mkdir -p $(@D)
+	@grep -q 'extern "C"' $< || { echo '$<: no extern "C" block'; exit 1; }
+	@echo '#include "$(abspath $<)"' | $(CC) -x c -std=gnu99 -fsyntax-only $(HEADER_INC) -
+	@echo '#include "$(abspath $<)"' > $(@:.ok=.cpp)
+	@$(CXX) -std=c++23 -c -o $(@:.ok=.o) -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) $(@:.ok=.cpp)
+	@touch $@
+
+$(BIN)/headers/%.hpp.ok: $(SRC)/%.hpp
+	@mkdir -p $(@D)
+	@! grep -q 'extern "C"' $< || { echo '$<: extern "C" block in a C++ header'; exit 1; }
+	@echo '#include "$(abspath $<)"' > $(@:.ok=.cpp)
+	@$(CXX) $(CXXFLAGS) -c -o $(@:.ok=.o) -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) $(@:.ok=.cpp)
+	@touch $@
+
+-include $(HEADER_STAMPS:.ok=.d)
+
+# A C++ test links the C sources that it tests as objects compiled as C. Give it
+# a rule of its own that links with $(CXX), as each C test has a rule of its own:
+#
+#   $(BIN)/test_x: $(BIN)/obj/test_x.o $(BIN)/obj/x.o
+#   	$(CXX) $(CXXFLAGS) -o $@ $^
+$(BIN)/obj/%.o: $(SRC)/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(INC) -MMD -MP -c -o $@ $<
+
+$(BIN)/obj/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INC) -MMD -MP -c -o $@ $<
+
+-include $(wildcard $(BIN)/obj/*.d)
+
+$(BIN):
+	mkdir -p $(BIN)
+
+INPUT_EVENTS_SRC = $(SRC)/input/input_driver.cpp $(SRC)/input/button_detector.cpp \
+                   $(SRC)/input/common_button_handler.cpp $(SRC)/input/input_manager.cpp
+
+$(BIN)/test_input_events: test_input_events.cpp $(INPUT_EVENTS_SRC) $(SRC)/input/input_events.hpp \
+                          $(SRC)/input/input_listeners.hpp \
+                          $(SRC)/input/input_driver.hpp $(SRC)/input/input_state.hpp \
+                          $(SRC)/input/button_detector.hpp \
+                          $(SRC)/input/common_button_handler.hpp $(SRC)/input/input_manager.hpp \
+                          $(SRC)/help_screen.h test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_input_events.cpp $(INPUT_EVENTS_SRC)
+
+$(BIN)/test_page_context: test_page_context.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/page/page_context.hpp \
+                          $(SRC)/ui/view/ui_context.hpp $(SRC)/ui/view/ui_task_scheduler.hpp \
+                          $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_view.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_page_context.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/view/ui_view.cpp
+
+$(BIN)/test_activity_clock: test_activity_clock.cpp $(SRC)/ui/page/activity_clock.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_activity_clock.cpp
+
+PAGE_STACK_SRC = $(SRC)/ui/page/page_stack.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/page/legacy_module_page.cpp $(INPUT_EVENTS_SRC) \
+                 $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
+                 $(SRC)/ui/view/ui_compositor.cpp $(SRC)/ui/view/snapshot_view.cpp \
+                 $(SRC)/ui/view/background_view.cpp $(SRC)/ui/view/source_gradient.cpp
+
+$(BIN)/test_page_stack: test_page_stack.cpp $(PAGE_STACK_SRC) $(SRC)/ui/page/page_stack.hpp \
+                        $(SRC)/ui/page/ui_page.hpp $(SRC)/ui/page/legacy_module_page.hpp \
+                        $(SRC)/input/input_manager.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_page_stack.cpp $(PAGE_STACK_SRC) \
+	  $(shell pkg-config --libs sdl2)
+
+UI_COMPOSITOR_SRC = $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
+                    $(SRC)/ui/view/ui_compositor.cpp $(SRC)/ui/page/page_context.cpp
+
+$(BIN)/test_ui_compositor: test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) $(SRC)/ui/view/ui_view.hpp \
+                           $(SRC)/ui/view/ui_layout_context.hpp $(SRC)/ui/view/ui_compositor.hpp $(SRC)/ui_layers.h test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) \
+	  $(shell pkg-config --libs sdl2)
+
+$(BIN)/test_source_gradient: test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp \
+                            $(SRC)/ui/view/source_gradient.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_source_gradient.cpp $(SRC)/ui/view/source_gradient.cpp
+
+$(BIN)/test_rounded_rect: test_rounded_rect.cpp $(SRC)/ui/view/rounded_rect.cpp $(SRC)/ui/view/rounded_rect.hpp \
+                          test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_rounded_rect.cpp $(SRC)/ui/view/rounded_rect.cpp
+
+$(BIN)/test_art_glyph: test_art_glyph.cpp $(SRC)/ui/view/art_glyph.cpp $(SRC)/ui/view/art_glyph.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_art_glyph.cpp $(SRC)/ui/view/art_glyph.cpp
+
+$(BIN)/test_detail_panel_layout: test_detail_panel_layout.cpp $(SRC)/ui/view/detail_panel_layout.cpp \
+                                 $(SRC)/ui/view/detail_panel_layout.hpp $(SRC)/ui/view/source_gradient.cpp \
+                                 $(SRC)/ui/view/source_gradient.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_detail_panel_layout.cpp $(SRC)/ui/view/detail_panel_layout.cpp \
+	  $(SRC)/ui/view/source_gradient.cpp
+
+$(BIN)/test_browser_nav: test_browser_nav.cpp $(SRC)/browser_nav.cpp $(SRC)/browser_nav.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_browser_nav.cpp $(SRC)/browser_nav.cpp
+
+$(BIN)/test_music_player_layout: test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp $(SRC)/ui/music_player_layout.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_music_player_layout.cpp $(SRC)/ui/music_player_layout.cpp
+
+$(BIN)/test_radio_favourites: test_radio_favourites.c $(SRC)/radio_favourites.c $(SRC)/radio_favourites.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_radio_favourites.c $(SRC)/radio_favourites.c
+
+$(BIN)/test_radio_station_name: test_radio_station_name.cpp $(SRC)/radio_station_name.cpp $(SRC)/radio_station_name.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_radio_station_name.cpp $(SRC)/radio_station_name.cpp
+
+$(BIN)/test_radio_search: test_radio_search.cpp $(SRC)/radio_search.cpp $(SRC)/radio_search.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_radio_search.cpp $(SRC)/radio_search.cpp
+
+$(BIN)/test_radio_player_state: test_radio_player_state.cpp $(SRC)/radio_player_state.cpp $(SRC)/radio_player_state.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_radio_player_state.cpp $(SRC)/radio_player_state.cpp
+
+$(BIN)/test_podcast_format: test_podcast_format.cpp $(SRC)/podcast_format.cpp $(SRC)/podcast_format.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_podcast_format.cpp $(SRC)/podcast_format.cpp
+
+$(BIN)/test_podcast_rss: test_podcast_rss.c $(SRC)/podcast_rss.c $(SRC)/podcast.h \
+                         $(SRC)/include/yxml/yxml.c fixtures/radiofrance_bestioles.xml \
+                         fixtures/radiofrance_odyssees.xml test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -I$(SRC)/include/yxml -DTEST_FIXTURE_DIR='"$(abspath fixtures)"' \
+	  -o $@ test_podcast_rss.c $(SRC)/podcast_rss.c $(SRC)/include/yxml/yxml.c
+
+$(BIN)/test_podcast_import_parse: test_podcast_import_parse.c $(SRC)/podcast_import_parse.c \
+                                  $(SRC)/podcast_import_parse.h $(SRC)/podcast.h \
+                                  $(SRC)/include/yxml/yxml.c fixtures/podcast_import_nested.opml test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -I$(SRC)/include/yxml -DTEST_FIXTURE_DIR='"$(abspath fixtures)"' \
+	  -o $@ test_podcast_import_parse.c $(SRC)/podcast_import_parse.c $(SRC)/include/yxml/yxml.c
+
+$(BIN)/test_sleep_timer: test_sleep_timer.c $(SRC)/sleep_timer.c $(SRC)/sleep_timer.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_sleep_timer.c $(SRC)/sleep_timer.c
+
+$(BIN)/test_options_panel_layout: test_options_panel_layout.cpp $(SRC)/ui/view/options_panel_layout.cpp $(SRC)/ui/view/options_panel_layout.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_options_panel_layout.cpp $(SRC)/ui/view/options_panel_layout.cpp
+
+$(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c
+
+$(BIN)/test_radio_step: test_radio_step.c $(SRC)/radio_step.c $(SRC)/radio.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_radio_step.c $(SRC)/radio_step.c
+
+$(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
+
+$(BIN)/test_stopwatch: test_stopwatch.cpp $(SRC)/stopwatch.cpp $(SRC)/stopwatch.h test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_stopwatch.cpp $(SRC)/stopwatch.cpp
+
+$(BIN)/test_error: test_error.cpp $(SRC)/error.cpp $(SRC)/error.h $(BIN)/obj/utf8.o test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_error.cpp $(SRC)/error.cpp $(BIN)/obj/utf8.o
+
+$(BIN)/test_screen_title: test_screen_title.c $(SRC)/screen_title.c $(SRC)/screen_title.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_screen_title.c $(SRC)/screen_title.c
+
+$(BIN)/test_frame_state: test_frame_state.c $(SRC)/frame_state.c $(SRC)/frame_state.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_frame_state.c $(SRC)/frame_state.c
+
+$(BIN)/test_lyric_window: test_lyric_window.c $(SRC)/lyric_window.c $(SRC)/lyric_window.h \
+                          $(SRC)/lyrics.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_lyric_window.c $(SRC)/lyric_window.c
+
+$(BIN)/test_seek_scan: test_seek_scan.c $(SRC)/seek_scan.c $(SRC)/seek_scan.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_seek_scan.c $(SRC)/seek_scan.c
+
+$(BIN)/test_mp3_seek: test_mp3_seek.c $(SRC)/mp3_seek.c $(SRC)/mp3_seek.h $(SRC)/audio/dr_mp3.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_mp3_seek.c $(SRC)/mp3_seek.c -lm
+
+$(BIN)/test_keyboard_map: test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/keyboard_map.h $(SRC)/utf8.c test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/utf8.c
+
+$(BIN)/test_ui_theme: test_ui_theme.c $(SRC)/ui_theme_utils.c $(SRC)/ui_theme.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_ui_theme.c $(SRC)/ui_theme_utils.c -lm
+
+$(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_utf8.c $(SRC)/utf8.c
+
+$(BIN)/test_id3: test_id3.c $(SRC)/id3.c $(SRC)/id3.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_id3.c $(SRC)/id3.c $(SRC)/utf8.c
+
+$(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c \
+                              $(SRC)/spectrum.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c -lm
+
+# The database tests compile and link the SQLite version of the devices, not the
+# library of the host, thus SQL that the devices do not have fails here too.
+SQLITE_DIR  = ../deps/sqlite
+SQLITE_OBJ  = $(BIN)/sqlite3.o
+SQLITE_LIBS = $(SQLITE_OBJ) -ldl -lpthread
+
+$(SQLITE_DIR)/sqlite3.c:
+	@echo "deps/sqlite is missing - run ./dev deps fetch" >&2; exit 1
+
+$(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(BIN)
+	$(CC) $(CFLAGS) -O1 -w -c -o $@ $<
+
+DB_INC = -I$(SQLITE_DIR) $(INC) -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
+         -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' -DUSE_SDL2
+TEST_TEMP_DIR ?= $(abspath ../.codex_tmp/tests/data)
+
+$(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
+                $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/db-userdata"' \
+	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/db-music"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c \
+	  $(SQLITE_LIBS) -lzip
+
+$(BIN)/test_settings: test_settings.c $(SRC)/settings.c $(SRC)/settings.h \
+                      $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                      $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
+                      $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/settings-userdata"' \
+	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/settings-music"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_settings.c $(SRC)/settings.c $(SRC)/db.c $(SRC)/db_schema.c \
+	  $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
+
+M3U_TEST_MUSIC = $(TEST_TEMP_DIR)/playlist-music
+M3U_TEST_DB = $(TEST_TEMP_DIR)/playlist-m3u.db
+
+$(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
+                          $(SRC)/playlist_m3u.h $(SRC)/playlist.h \
+                          $(SRC)/filedb.c $(SRC)/filedb.h \
+                          $(SRC)/browser.h $(SRC)/db.c $(SRC)/db.h \
+                          $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                          $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
+                          $(SRC)/file_utils.c $(SRC)/file_utils.h \
+                          $(SRC)/utf8.c $(SRC)/utf8.h test.h $(SQLITE_OBJ) | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DMUSIC_PATH='"$(M3U_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
+	  -DTEST_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DTEST_MUSIC_PATH='"$(M3U_TEST_MUSIC)"' \
+	  -DTEST_DATABASE_PATH='"$(M3U_TEST_DB)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/playlist-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_playlist_m3u.c $(SRC)/playlist_m3u.c $(SRC)/filedb.c $(SRC)/db.c \
+	  $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c \
+	  $(SRC)/utf8.c \
+	  $(SQLITE_LIBS) -lzip
+
+$(BIN)/test_background: test_background.c $(SRC)/background.c $(SRC)/background.h \
+                         $(SRC)/music_session.h $(SRC)/module_common.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_background.c $(SRC)/background.c
+
+$(BIN)/test_icy: test_icy.c $(SRC)/icy.c $(SRC)/icy.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_icy.c $(SRC)/icy.c $(SRC)/utf8.c
+
+# radio_hls.c includes defines.h of NextUI, thus its test takes the include path of
+# the platform. The test gives its own radio_net_fetch().
+$(BIN)/test_radio_hls: test_radio_hls.c $(SRC)/radio_hls.c $(SRC)/radio_hls.h \
+                       $(SRC)/id3.c $(SRC)/id3.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(DB_INC) -o $@ test_radio_hls.c $(SRC)/radio_hls.c $(SRC)/id3.c \
+	  $(SRC)/utf8.c
+
+RESUME_TEST_MUSIC = $(TEST_TEMP_DIR)/resume-music
+RESUME_TEST_DB = $(TEST_TEMP_DIR)/resume.db
+
+$(BIN)/test_resume: test_resume.c $(SRC)/resume.c $(SRC)/resume.h \
+                     $(SRC)/filedb.c $(SRC)/filedb.h \
+                     $(SRC)/playlist_m3u.c $(SRC)/playlist_m3u.h \
+                     $(SRC)/playlist.h $(SRC)/browser.h $(SRC)/db.c \
+                     $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                     $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
+                     $(SRC)/file_utils.c $(SRC)/file_utils.h \
+                     $(SRC)/utf8.c $(SRC)/utf8.h test.h $(SQLITE_OBJ) | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DMUSIC_PATH='"$(RESUME_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
+	  -DTEST_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DTEST_MUSIC_PATH='"$(RESUME_TEST_MUSIC)"' \
+	  -DTEST_DATABASE_PATH='"$(RESUME_TEST_DB)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/resume-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_resume.c $(SRC)/resume.c $(SRC)/filedb.c $(SRC)/playlist_m3u.c \
+	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c \
+	  $(SRC)/file_utils.c $(SRC)/utf8.c $(SQLITE_LIBS) -lzip
+
+FILEDB_TEST_MUSIC = $(TEST_TEMP_DIR)/filedb-music
+FILEDB_TEST_DB = $(TEST_TEMP_DIR)/filedb.db
+
+$(BIN)/test_filedb: test_filedb.c $(SRC)/filedb.c $(SRC)/filedb.h \
+                     $(SRC)/browser.c $(SRC)/browser.h \
+                     $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                     $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
+                     $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/filedb-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DMUSIC_PATH='"$(FILEDB_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
+	  -DFILEDB_MUSIC_PATH='"$(FILEDB_TEST_MUSIC)"' \
+	  -DFILEDB_DATABASE_PATH='"$(FILEDB_TEST_DB)"' \
+	  -o $@ test_filedb.c $(SRC)/filedb.c $(SRC)/browser.c $(SRC)/db.c $(SRC)/db_schema.c \
+	  $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
+
+PLAYLIST_TEST_MUSIC = $(TEST_TEMP_DIR)/queue-music
+PLAYLIST_TEST_DB = $(TEST_TEMP_DIR)/queue.db
+
+$(BIN)/test_playlist: test_playlist.c $(SRC)/playlist.c $(SRC)/playlist.h \
+                       $(SRC)/filedb.c $(SRC)/filedb.h \
+                       $(SRC)/browser.c $(SRC)/browser.h \
+                       $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                       $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
+                       $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/queue-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DMUSIC_PATH='"$(PLAYLIST_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
+	  -DPLAYLIST_MUSIC_PATH='"$(PLAYLIST_TEST_MUSIC)"' \
+	  -DPLAYLIST_DATABASE_PATH='"$(PLAYLIST_TEST_DB)"' \
+	  -o $@ test_playlist.c $(SRC)/playlist.c $(SRC)/filedb.c $(SRC)/browser.c \
+	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c \
+	  $(SQLITE_LIBS) -lzip
+
+DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
+                -Wl,-rpath,/var/tmp/nextui/lib
+DESKTOP_LIBS = $(DESKTOP_RPATH) -L$(DESKTOP_BUILD) -L/var/tmp/nextui/lib \
+               -L../NextUI/workspace/desktop/libmsettings \
+               $(shell pkg-config --libs sdl2) -lSDL2_ttf -lSDL2_image -lsamplerate \
+               -lzip -lsqlite3 -lopus -lmbedtls -lm -lpthread -ldl -lz -lGL -lmsettings
+DESKTOP_INC = -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
+              -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' \
+              -DUSE_SDL2 -DUSE_GL
+# Every object of the desktop build except the two that this test replaces: its
+# own main, and ui_utils.o, which the test compiles from the source instead.
+DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+                        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+                      | grep -v -e musicplayer.o -e ui_utils.o)
+# The objects come from the desktop build, thus they must be as new as the sources.
+# src/Makefile tracks each header with -MMD and -include, thus this delegation
+# rebuilds what changed and nothing else.
+.PHONY: desktop-objs
+desktop-objs:
+	@test -d $(DESKTOP_OBJ) || \
+	  { echo "test_ui_utils needs the $(KIND) desktop build."; \
+	    echo "Run: ./dev build desktop --$(KIND)"; exit 1; }
+	@$(MAKE) --no-print-directory -C ../src objs PLATFORM=desktop KIND=$(KIND) \
+	  NEXTUI_ROOT=$(abspath ../NextUI/workspace)
+
+# The objects of the desktop build hold C++ code, thus each test that links them
+# compiles its C sources with $(CC) and links with $(CXX), as the app does.
+$(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN) desktop-objs
+	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_utils.c
+	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.ui_utils.o $(SRC)/ui_utils.c
+	$(CXX) -o $@ $@.o $@.ui_utils.o \
+	  $(DESKTOP_LINK_OBJ) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
+
+$(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
+	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_fonts.c
+	$(CXX) -o $@ $@.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
+
+$(BIN)/test_ui_views: test_ui_views.cpp $(SRC)/ui/view/ui_view.hpp $(SRC)/ui/view/ui_compositor.hpp \
+                      $(SRC)/ui/view/text_view.hpp $(SRC)/ui/view/title_text_view.hpp $(SRC)/ui/view/list_row_view.hpp $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/status_group_view.hpp $(SRC)/ui/view/list_screen_view.hpp $(SRC)/ui/view/box_view.hpp $(SRC)/ui/view/dialog_view.hpp $(SRC)/ui/view/multiline_text_view.hpp $(SRC)/ui/view/spanned_text.hpp $(SRC)/ui/view/bitmap_view.hpp $(SRC)/ui/view/progress_bar_view.hpp $(SRC)/ui/view/empty_state_view.hpp test.h | $(BIN) desktop-objs
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_views.cpp
+	$(CXX) -o $@ $@.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o -e ui_layers.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
+
+$(BIN)/test_wifi_dialog: test_wifi_dialog.cpp $(SRC)/ui/wifi_dialog_page.hpp $(SRC)/wifi.h $(SRC)/toast.h test.h | $(BIN) desktop-objs
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_wifi_dialog.cpp
+	$(CXX) -o $@ $@.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o -e ui_layers.o -e /wifi.o -e /toast.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
+
+$(BIN)/test_list_screen_controller: test_list_screen_controller.cpp $(SRC)/ui/page/list_screen_controller.hpp \
+                                    $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/list_item_view.hpp test.h | $(BIN) desktop-objs
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_list_screen_controller.cpp
+	$(CXX) -o $@ $@.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o -e ui_layers.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
+
+$(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/file-utils-userdata"' \
+	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/file-utils-music"' \
+	  -DFILE_UTILS_CARD_PATH='"/card"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
+
+run: check $(TESTS)
+	@fail=0; for t in $(TESTS); do echo "== $$t =="; ./$$t || fail=1; echo; done; \
+	 if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
+
+clean:
+	rm -rf $(BIN)
+
+$(BIN)/test_version: test_version.c $(SRC)/version.c $(SRC)/version.h \
+                     $(SRC)/include/parson/parson.c test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_version.c $(SRC)/version.c $(SRC)/include/parson/parson.c
+
+$(BIN)/test_selfupdate_install: test_selfupdate_install.c $(SRC)/selfupdate_install.c \
+                                $(SRC)/selfupdate.h $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/selfupdate-install-userdata"' \
+	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/selfupdate-install-music"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_selfupdate_install.c $(SRC)/selfupdate_install.c $(SRC)/file_utils.c -lzip

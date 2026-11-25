@@ -1,6 +1,10 @@
 #ifndef __PODCAST_H__
 #define __PODCAST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -33,8 +37,8 @@ typedef struct {
 // Episode pagination - only load this many into memory at a time
 #define PODCAST_EPISODE_PAGE_SIZE 50
 
-// Data paths (relative to SDCARD_PATH/.userdata/tg5040/)
-#define PODCAST_DATA_DIR "music-player/podcast"
+// Data paths under the user data directory of the app
+#define PODCAST_DATA_DIR "podcast"
 #define PODCAST_SUBSCRIPTIONS_FILE "subscriptions.json"
 
 // Podcast episode
@@ -320,6 +324,23 @@ int Podcast_getDownloadedEpisodeIndex(int feed_index, int episode_index);
 // Returns pointer to episode in internal cache, or NULL if invalid
 PodcastEpisode* Podcast_getEpisode(int feed_index, int episode_index);
 
+// What a list of episodes shows of each episode
+typedef struct {
+    char guid[PODCAST_MAX_GUID];
+    char title[PODCAST_MAX_TITLE];
+    int progress_sec;                    // -1: played
+    bool is_new;
+} PodcastEpisodeBrief;
+
+// Fills `out` with the briefs of the episodes of a feed, in the order of the list, reading the
+// episodes file once (the page cache of Podcast_getEpisode would read it again for each page).
+// `out` is allocated by the caller for `max` entries. Returns the number of briefs written.
+int Podcast_getEpisodeBriefs(int feed_index, PodcastEpisodeBrief* out, int max);
+
+// The subscription and the episode that play, or -1 when none plays
+int Podcast_getCurrentFeedIndex(void);
+int Podcast_getCurrentEpisodeIndex(void);
+
 // Load a page of episodes into cache
 // Returns number of episodes loaded
 int Podcast_loadEpisodePage(int feed_index, int offset);
@@ -359,5 +380,14 @@ int podcast_rss_parse(const char* xml_data, int xml_len, PodcastFeed* feed);
 int podcast_rss_parse_with_episodes(const char* xml_data, int xml_len, PodcastFeed* feed,
                                      PodcastEpisode* episodes_out, int max_episodes,
                                      int* episode_count_out);
+
+// File extension that an enclosure URL names, in lower case and without the dot: "mp3",
+// "m4a", "aac", "ogg", "opus", "wav" or "flac". The player picks its decoder by extension,
+// so a file saved under the wrong one does not play. Anything else gives "mp3".
+const char* podcast_enclosure_extension(const char* url);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __PODCAST_H__

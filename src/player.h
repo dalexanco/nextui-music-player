@@ -1,6 +1,10 @@
 #ifndef __PLAYER_H__
 #define __PLAYER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
@@ -53,6 +57,7 @@ typedef struct {
     int source_channels;
     int64_t total_frames;
     int64_t current_frame;
+    void* mp3_seek;             // Mp3SeekState* where an MP3 file holds a seek table, else NULL
 } StreamDecoder;
 
 // Circular buffer for streaming playback
@@ -78,6 +83,9 @@ typedef struct {
 
     // Album art
     SDL_Surface* album_art;     // Cached album art surface (NULL if none)
+
+    // Lyrics from the tags of the file, synced (LRC) or plain text (NULL if none)
+    char* lyrics;
 
     // Playback
     int position_ms;        // Current position in milliseconds
@@ -172,6 +180,10 @@ const WaveformData* Player_getWaveform(void);
 // Get album art surface (NULL if no album art available)
 SDL_Surface* Player_getAlbumArt(void);
 
+// Get the lyrics text from the tags of the current file (NULL if it has none).
+// The text is LRC or plain; it stays valid until the next load or stop.
+const char* Player_getEmbeddedLyrics(void);
+
 // Set playback speed (0.5 to 2.0, default 1.0)
 void Player_setPlaybackSpeed(float speed);
 
@@ -183,6 +195,18 @@ AudioFormat Player_detectFormat(const char* filepath);
 
 // Update player (call this in main loop)
 void Player_update(void);
+
+// Apply a change of the audio sink (Bluetooth, USB DAC, speaker) that the watcher
+// saw. Call on the main thread, once each frame.
+void Player_handleAudioSinkChange(void);
+
+// Give the system volume to the mixer of the current output, as NextUI does for
+// each output, and play at full scale. Call at start and after a change of the output.
+void Player_syncOutputVolume(void);
+
+// A count that grows each time Player_handleAudioSinkChange() handles a change.
+// A screen redraws when it changes, thus the status pill shows the new output.
+unsigned Player_getAudioSinkGeneration(void);
 
 // Resume/pause audio device (used by radio module)
 void Player_resumeAudio(void);
@@ -218,5 +242,9 @@ USBHIDEvent Player_pollUSBHID(void);
 
 // Cleanup USB HID monitoring
 void Player_quitUSBHID(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

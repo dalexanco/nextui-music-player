@@ -1,10 +1,11 @@
 ###########################################################
 # Supported platforms
-#   tg5040 / tg5050 : ARM64 device builds (cross-compiled in the Docker toolchain)
+#   tg5040 / tg5050 / my355 / h700 : ARM64 device builds (cross-compiled in the Docker
+#                     toolchain)
 #   desktop         : native Linux/macOS build for local dev/testing (no device,
 #                     no cross-compiler). Uses SDL2 + desktop OpenGL instead of
 #                     GLES, and has no AAC/M4A support (see fdk_aac_desktop_stub.c).
-SUPPORTED_PLATFORMS = tg5040 tg5050 desktop
+SUPPORTED_PLATFORMS = tg5040 tg5050 my355 h700 desktop
 DEFAULT_PLATFORM = tg5040
 
 ifeq (,$(PLATFORM))
@@ -26,11 +27,41 @@ endif
 endif
 
 ###########################################################
+# Build kinds
+#   debug   : optimized, with debug information and with the control channel.
+#             The default, because a local build is for a person who examines it.
+#   release : the same optimized code, with no symbol table and with no control
+#             channel. The pak receives this kind.
+#
+# The two kinds optimize the same, thus a fault that the optimizer causes is in
+# both and the debug kind shows the behavior of the release kind.
+#
+# Each kind writes its objects to its own directory, thus a change of the kind
+# does not compile the tree again. Both kinds write the same binary path, thus
+# the last build is the one that runs and the one that a pak receives.
+SUPPORTED_KINDS = debug release
+DEFAULT_KIND = debug
+
+ifeq (,$(KIND))
+KIND = $(DEFAULT_KIND)
+endif
+ifeq (,$(filter $(KIND),$(SUPPORTED_KINDS)))
+$(error Invalid KIND '$(KIND)'. Supported: $(SUPPORTED_KINDS))
+endif
+
+###########################################################
 
 TARGET   = musicplayer
 PRODUCT  = ../bin/$(PLATFORM)/$(TARGET).elf
 
-BUILD_DIR        = build/$(PLATFORM)
+# Both kinds write the same binary, thus a change of the kind must link again.
+# The objects alone do not say so: each kind keeps its own, and the objects of
+# the kind that the caller asks for can be older than the binary that the other
+# kind left. This marker holds the kind of the binary that is in place, and the
+# link depends on it.
+PRODUCT_KIND = ../bin/$(PLATFORM)/.kind
+
+BUILD_DIR        = build/$(KIND)/$(PLATFORM)
 OBJ_DIR          = $(BUILD_DIR)/obj
 OPUS_OBJ_DIR     = $(BUILD_DIR)/opus_obj
 MBEDTLS_OBJ_DIR  = $(BUILD_DIR)/mbedtls_obj
@@ -38,6 +69,34 @@ LIBOPUS          = $(BUILD_DIR)/libopus.a
 LIBMBEDTLS       = $(BUILD_DIR)/libmbedtls.a
 
 CC = $(CROSS_COMPILE)gcc
+
+# C++ code is C++23 with no exceptions and no RTTI. Each build compiles it with
+# Zig, thus the desktop gets the same Clang, libc++ and warnings as a device.
+# Zig also makes the final link, and it links libc++ statically. A device
+# build uses no glibc symbol newer than GLIBC_VERSION. The caller sets
+# GLIBC_VERSION to the glibc of the sysroot, for example 2.28, because the
+# libraries of the sysroot use the symbols of that version. A desktop build
+# targets the host. A toolchain image runs the Linux Zig for the CPU of the
+# host, and a desktop build runs the Zig for the system of the host.
+ZIG_CPU := $(shell uname -m | sed -e s/arm64/aarch64/ -e s/amd64/x86_64/)
+ifeq ($(PLATFORM), desktop)
+ZIG_SYSTEM := $(if $(filter Darwin,$(shell uname -s)),macos,linux)
+else
+ZIG_SYSTEM := linux
+endif
+ZIG ?= ../deps/zig/$(ZIG_CPU)-$(ZIG_SYSTEM)/zig
+# ./dev deps fetch puts zig-c++ beside zig. It runs `zig c++`, under a name that
+# an IDE knows as the name of a compiler.
+ZIG_CXX = $(dir $(ZIG))zig-c++
+ifeq ($(PLATFORM), desktop)
+CXX = $(ZIG_CXX)
+else
+CXX = $(ZIG_CXX) -target aarch64-linux-gnu.$(GLIBC_VERSION)
+endif
+# The container of a build is removed after it, thus the cache of Zig lives in
+# the project. It keeps the libc++ that Zig builds once for each target.
+export ZIG_GLOBAL_CACHE_DIR = $(CURDIR)/build/zig-cache
+export ZIG_LOCAL_CACHE_DIR  = $(CURDIR)/build/zig-cache
 
 # macOS's plain `ar` is the Apple/LLVM one, which can't be relied on to match
 # the GCC toolchain we build with there; use gcc-ar instead. Device/Linux
@@ -53,16 +112,44 @@ AR = $(CROSS_COMPILE)ar
 endif
 
 ###########################################################
+# NextUI source tree. `./dev deps fetch` checks it out into <project>/NextUI; the
+# container build mounts it at the same relative path. Override to build
+# against a tree that lives somewhere else.
+
+NEXTUI_ROOT ?= ../NextUI/workspace
+
+# `clean` is exempt so a tree can always be scrubbed without its dependencies.
+ifeq (,$(filter clean,$(MAKECMDGOALS)))
+ifeq (,$(wildcard $(BUILD_DIR)/version_string.c))
+$(error No $(BUILD_DIR)/version_string.c - build through ./dev)
+endif
+ifeq (,$(wildcard $(NEXTUI_ROOT)/all/common/api.h))
+$(error No NextUI tree at $(NEXTUI_ROOT) - run ./dev deps fetch, or set NEXTUI_ROOT)
+endif
+ifeq (,$(wildcard $(ZIG)))
+$(error No Zig at $(ZIG) - run ./dev deps fetch, or set ZIG)
+endif
+ifeq (,$(wildcard $(ZIG_CXX)))
+$(error No zig-c++ at $(ZIG_CXX) - run ./dev deps fetch)
+endif
+ifneq ($(PLATFORM), desktop)
+ifeq (,$(filter 2.%,$(GLIBC_VERSION)))
+$(error No GLIBC_VERSION - build through ./dev, or set it to the glibc of the sysroot)
+endif
+endif
+endif
+
+###########################################################
 # Include paths
 
 INCDIR  = -I. -I./audio
-INCDIR += -I../../all/common/ -I../../$(PLATFORM)/platform/
-INCDIR += -I../../all/minarch/libretro-common/include
+INCDIR += -I$(NEXTUI_ROOT)/all/common/ -I$(NEXTUI_ROOT)/$(PLATFORM)/platform/
+INCDIR += -I$(NEXTUI_ROOT)/all/minarch/libretro-common/include
 INCDIR += -I./include -I./include/mbedtls_lib -I./include/yxml
 INCDIR += -I./include/libogg/include -I./include/libopus/include
 INCDIR += -I./include/opusfile/include
 INCDIR += -I$(PREFIX)/include -I$(PREFIX_LOCAL)/include
-INCDIR += -I../../$(PLATFORM)/libmsettings
+INCDIR += -I$(NEXTUI_ROOT)/$(PLATFORM)/libmsettings
 
 ###########################################################
 # Opus / OGG / Opusfile — built as libopus.a
@@ -97,6 +184,9 @@ OPUS_INCDIR = \
     -I./include/libopus/silk \
     -I./include/libopus/silk/float
 
+# The third-party libraries keep the optimized flags for every kind. A debug
+# kind that decodes at -O0 cannot hold the audio on the device, and a fault in
+# this app is not a fault in opus or in mbedTLS.
 OPUS_CFLAGS = \
     -O2 -fomit-frame-pointer \
     -DOPUS_BUILD -DVAR_ARRAYS -DHAVE_LRINTF \
@@ -124,20 +214,38 @@ MBEDTLS_OBJS = $(patsubst %.c,$(MBEDTLS_OBJ_DIR)/%.o,$(MBEDTLS_SRC))
 # Main application sources
 
 LOCAL_SRC = \
-    musicplayer.c player.c playlist.c playlist_m3u.c \
-    radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
-    downloader.c selfupdate.c display_helper.c \
-    podcast.c podcast_rss.c podcast_search.c \
-    http_download.c wget_fetch.c wifi.c keyboard.c settings.c resume.c \
+    version.c \
+    musicplayer.cpp player.c filedb.c playlist.c playlist_m3u.c \
+    db.c db_schema.c db_statement.c debug.c \
+    radio.c radio_favourites.c radio_favourites_store.c radio_sleep.c radio_player_state.cpp radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
+    downloader.c selfupdate.c selfupdate_install.c display_helper.c pad_reset.c \
+    podcast.c podcast_rss.c podcast_search.c podcast_import.c podcast_import_parse.c \
+    http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
-    module_common.c module_menu.c module_library.c module_player.c \
-    module_playlist.c module_radio.c module_podcast.c module_downloader.c \
-    module_system.c module_settings.c \
+    module_common.c music_session.c sleep_timer.c \
+    radio_step.c module_podcast.c module_downloader.c \
+    frame_state.c ui_layers.c lyric_window.c \
+    list_nav.c list_nav_pad.c mp3_seek.c seek_scan.c toast.c toast_state.c screen_title.c stopwatch.cpp error.cpp \
     ui_fonts.c ui_icons.c ui_utils.c browser.c ui_album_art.c \
-    ui_main.c ui_music.c ui_radio.c ui_downloader.c ui_podcast.c \
-    ui_playlist.c ui_system.c ui_settings.c \
+    ui_main.c ui_downloader.c \
+    ui_keyboard.c ui_theme.c \
+    ui_theme_utils.c keyboard_map.c utf8.c id3.c icy.c \
     spectrum.c \
-    audio/kiss_fft.c audio/kiss_fftr.c \
+    spectrum_ceiling.c \
+    input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
+    input/common_button_handler.cpp input/common_button_handler_nextui.cpp input/input_manager.cpp \
+    browser_nav.cpp ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/page/list_screen_controller.cpp ui/quit_dialog_page.cpp ui/confirm_dialog_page.cpp ui/wifi_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
+    ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/radio_stations_page.cpp ui/radio_search_page.cpp radio_search.cpp ui/radio_options_page.cpp ui/radio_station_panel.cpp ui/view/star_icon.cpp ui/view/heart_icon.cpp radio_station_name.cpp ui/podcast_page.cpp ui/podcast_queue_page.cpp ui/podcast_manage_page.cpp ui/podcast_import_page.cpp ui/podcast_catalog_page.cpp ui/podcast_playing_page.cpp ui/podcast_options_page.cpp ui/podcast_art.cpp podcast_sleep.c ui/podcast_episodes_page.cpp ui/view/check_icon.cpp ui/podcast_show_panel.cpp podcast_format.cpp \
+    ui/settings_page.cpp ui/errors_page.cpp ui/about_page.cpp ui/app_update_page.cpp ui/ytdlp_install_page.cpp ui/file_browser_page.cpp \
+    ui/playlists_page.cpp ui/music_player_page.cpp ui/music_options_page.cpp ui/music_player_layout.cpp ui/sub_list_page.cpp ui/music_queue_page.cpp ui/add_to_playlist_page.cpp ui/playlist_tracks_page.cpp ui/text_input_page.cpp ui/downloader_page.cpp \
+    ui/main_menu_page.cpp ui/choice_options_page.cpp \
+    ui/view/ui_view.cpp ui/view/ui_layout_context.cpp ui/view/ui_compositor.cpp \
+    ui/view/text_view.cpp ui/view/title_text_view.cpp ui/view/list_row_view.cpp ui/view/list_view.cpp \
+    ui/view/scroll_indicator_view.cpp ui/view/scroll_view.cpp ui/view/vertical_layout.cpp ui/view/platform_group_view.cpp ui/view/status_group_view.cpp \
+    ui/view/button_hints_view.cpp ui/view/list_screen_view.cpp ui/view/screen_view.cpp ui/view/box_view.cpp \
+    ui/view/dialog_view.cpp ui/view/multiline_text_view.cpp ui/view/snapshot_view.cpp ui/view/bitmap_view.cpp ui/view/icon_view.cpp ui/view/progress_bar_view.cpp ui/view/empty_state_view.cpp ui/view/background_view.cpp ui/view/source_gradient.cpp ui/view/rounded_rect.cpp ui/view/rounded_rect_view.cpp ui/view/option_row_view.cpp ui/view/options_header_view.cpp \
+    ui/view/detail_panel_layout.cpp ui/view/art_tile_view.cpp ui/view/art_glyph.cpp ui/view/art_fade_view.cpp ui/view/chip_view.cpp ui/view/options_panel_view.cpp ui/view/options_panel_layout.cpp ui/view/info_block_view.cpp ui/view/detail_panel_view.cpp \
+    audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c
 
@@ -147,33 +255,63 @@ ifeq ($(PLATFORM), desktop)
 LOCAL_SRC += fdk_aac_desktop_stub.c
 endif
 
+# A release binary has no interface that puts synthetic buttons into the pad.
+# TEST_CONTROL also selects the declarations in test_control.h; without it each
+# call site gets a stub that does nothing.
+ifeq ($(KIND), debug)
+LOCAL_SRC += test_control.c
+endif
+
+# The input test screen is a diagnostic screen of the debug kind.
+ifeq ($(KIND), debug)
+LOCAL_SRC += ui/input_test_page.cpp
+endif
+
 # Sources that live outside src/ (shared NextUI code + per-platform code).
 # These need their own rule below: a plain $(OBJ_DIR)/%.o: %.c pattern would
-# reuse the same object/dep file across platforms, since the ../../ in the
+# reuse the same object/dep file across platforms, since the leading ../ in the
 # source path collapses right back out of $(OBJ_DIR) (e.g. both
-# build/tg5040/obj/../../all/common/api.o and build/tg5050/obj/../../all/common/api.o
-# resolve to build/all/common/api.o). That caused stale objects compiled for
-# one platform's headers to get linked into the other platform's binary.
+# build/tg5040/obj/../NextUI/workspace/all/common/api.o and its tg5050 twin
+# resolve to the same path). That caused stale objects compiled for one
+# platform's headers to get linked into the other platform's binary.
 EXT_SRC = \
-    ../../all/common/utils.c ../../all/common/api.c \
-    ../../all/common/config.c ../../all/common/scaler.c \
-    ../../$(PLATFORM)/platform/platform.c
+    $(NEXTUI_ROOT)/all/common/utils.c $(NEXTUI_ROOT)/all/common/api.c \
+    $(NEXTUI_ROOT)/all/common/config.c $(NEXTUI_ROOT)/all/common/scaler.c \
+    $(NEXTUI_ROOT)/$(PLATFORM)/platform/platform.c
 
 APP_SRC = $(LOCAL_SRC) $(EXT_SRC)
 
-LOCAL_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LOCAL_SRC))
-EXT_OBJS   = $(patsubst ../../%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
-APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS)
+LOCAL_OBJS = $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(basename $(LOCAL_SRC))))
+CXX_OBJS   = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(LOCAL_SRC)))
+EXT_OBJS   = $(patsubst $(NEXTUI_ROOT)/%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
+APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS) $(BUILD_DIR)/version_string.o
+
+# The C code of the app stays valid C++, thus a file can move to C++ with few
+# changes. GCC rejects most of what C++ does not allow: an implicit conversion
+# from void* or to an enum, an array compound literal, a string literal given
+# as char*, and a goto past an initialization. It does not reject the address
+# of a struct compound literal, or designators out of the order of the struct.
+# The vendored code in the subdirectories is not checked.
+OWN_C_SRC  = $(foreach src,$(filter %.c,$(LOCAL_SRC)),$(if $(findstring /,$(src)),,$(src)))
+OWN_C_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(OWN_C_SRC))
+$(OWN_C_OBJS): MY_CFLAGS += -Werror=c++-compat -Werror=write-strings \
+                            -Werror=discarded-qualifiers -Werror=jump-misses-init
 
 ###########################################################
 # Compiler / linker flags
 
-MY_CFLAGS  = -O2 -fomit-frame-pointer
+KIND_CFLAGS = -O2 -fomit-frame-pointer
+ifeq ($(KIND), debug)
+KIND_CFLAGS += -g -DDEBUG -DTEST_CONTROL
+endif
+
+MY_CFLAGS  = $(KIND_CFLAGS)
 MY_CFLAGS += -DMBEDTLS_CONFIG_FILE='<mbedtls_config.h>'
 MY_CFLAGS += -DOPUS_BUILD -DHAVE_LRINTF -DOP_DISABLE_HTTP -DOP_DISABLE_FLOAT_API
 MY_CFLAGS += $(INCDIR) -DPLATFORM=\"$(PLATFORM)\" -std=gnu99
 MY_CFLAGS += -DUSE_SDL2 -DGL_GLEXT_PROTOTYPES
 MY_CFLAGS += -MMD -MP
+MY_CFLAGS += -Werror=switch
 
 # Desktop uses full OpenGL; devices use GLES. Neither macro is read by this
 # repo's sources today (the GL context profile is picked at runtime via
@@ -184,15 +322,38 @@ else
 MY_CFLAGS += -DUSE_GLES
 endif
 
-MY_LDFLAGS  = -L$(BUILD_DIR)
+# The C++ flags are the C flags with the C++ language. The headers of the
+# sysroot come after the headers of the C++ library, because each C++ header
+# that wraps a C header includes the C header next on the path.
+MY_CXXFLAGS  = $(patsubst -I$(PREFIX)/include,-idirafter $(PREFIX)/include,$(filter-out -std=gnu99,$(MY_CFLAGS)))
+MY_CXXFLAGS += -std=c++23 -fno-exceptions -fno-rtti
+
+# A release binary carries no symbol table. Strip at the link, thus there is no
+# step after it that can be forgotten.
+ifeq ($(KIND), release)
+MY_LDFLAGS  = -s
+else
+MY_LDFLAGS  =
+endif
+MY_LDFLAGS += -L$(BUILD_DIR)
 MY_LDFLAGS += -L$(PREFIX)/lib -L$(PREFIX_LOCAL)/lib
-MY_LDFLAGS += -L$(PREFIX)/lib/$(CROSS_TRIPLE)
-MY_LDFLAGS += -L../../$(PLATFORM)/libmsettings
-MY_LDFLAGS += -L../../all/minarch/build/$(PLATFORM)
+MY_LDFLAGS += -L$(NEXTUI_ROOT)/$(PLATFORM)/libmsettings
+# The linker of Zig warns about a library directory that does not exist
+MY_LDFLAGS += $(addprefix -L,$(wildcard $(PREFIX)/lib/$(CROSS_TRIPLE) \
+                                        $(NEXTUI_ROOT)/all/minarch/build/$(PLATFORM)))
+
+# Remove the code that nothing calls. Keep each library that LDLIBS names, as
+# the GNU linker does: the linker of Zig keeps a shared library only where the
+# binary uses one of its symbols, and a library that only the firmware needs
+# must stay loaded. The Apple linker of a macOS desktop build knows neither
+# option.
+ifneq ($(PLATFORM), desktop)
+MY_LDFLAGS += -Wl,--gc-sections -Wl,--no-as-needed
+endif
 
 LDLIBS  = -lopus -lmbedtls
 LDLIBS += -lSDL2_image -lSDL2_ttf
-LDLIBS += -lmsettings -lsamplerate -lzip -lm -lpthread -ldl -lz
+LDLIBS += -lmsettings -lsamplerate -lzip -lsqlite3 -lm -lpthread -ldl -lz
 
 ifeq ($(PLATFORM), desktop)
 # Native desktop build: full OpenGL, and SDL2 provides audio output so there is
@@ -200,28 +361,58 @@ ifeq ($(PLATFORM), desktop)
 # M4A decoding is stubbed out — see fdk_aac_desktop_stub.c, linked via LOCAL_SRC.
 # GL links differently per host: macOS OpenGL is a framework, Linux is -lGL (no
 # gl.pc, so pkg-config falls back). Mirrors desktop/platform/makefile.env.
+MY_CFLAGS += -DPLATFORM_DESKTOP
 ifeq ($(shell uname -s), Darwin)
 LDLIBS += -lSDL2 -framework OpenGL
 else
 LDLIBS += $(shell pkg-config --libs sdl2 gl 2>/dev/null || echo "-lSDL2 -lGL")
 endif
 else
-LDLIBS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
-LDLIBS += -lasound -lfdk-aac
-ifeq ($(PLATFORM), tg5050)
+# Only the library names: the paths of pkg-config in an image are the paths of
+# the toolchain, and a path that it gives also goes into the RUNPATH of the
+# binary. -L$(PREFIX)/lib finds the libraries.
+ifeq ($(PLATFORM), h700)
+# The SDK GLES metadata names libUMP, which h700 does not use.
+LDLIBS += $(shell pkg-config --libs-only-l sdl2 2>/dev/null || echo "-lSDL2") -lGLESv2
+else
+LDLIBS += $(shell pkg-config --libs-only-l sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
+endif
+LDLIBS += -lfdk-aac
+# The audio libraries a device pulls in are whatever its toolchain sysroot
+# carries: the TrimUI targets have ALSA (tg5050 additionally needs tinyalsa),
+# h700 needs ALSA and tinyalsa. my355 has tinyalsa only.
+ifeq ($(PLATFORM), my355)
 LDLIBS += -ltinyalsa
+else
+LDLIBS += -lasound
+ifneq (,$(filter $(PLATFORM),tg5050 h700))
+LDLIBS += -ltinyalsa
+endif
 endif
 endif
 
 ###########################################################
 
-.PHONY: all clean
+.PHONY: all objs clean
 
 all: $(PRODUCT)
 
-$(PRODUCT): $(APP_OBJS) $(LIBOPUS) $(LIBMBEDTLS)
+# The objects and the libraries, and no binary. The unit tests link against them,
+# thus they must not replace the binary that the last build of the app left.
+objs: $(APP_OBJS) $(LIBOPUS) $(LIBMBEDTLS)
+
+# The recipe writes the marker only where the kind is different, thus the time of
+# the file changes on a change of the kind and on nothing else.
+.PHONY: FORCE
+FORCE:
+
+$(PRODUCT_KIND): FORCE
 	@mkdir -p $(@D)
-	$(CC) $(APP_OBJS) $(MY_LDFLAGS) -o $@ $(LDLIBS)
+	@test "$$(cat $@ 2>/dev/null)" = "$(KIND)" || printf '%s' "$(KIND)" > $@
+
+$(PRODUCT): $(APP_OBJS) $(LIBOPUS) $(LIBMBEDTLS) $(PRODUCT_KIND)
+	@mkdir -p $(@D)
+	$(CXX) $(APP_OBJS) $(MY_LDFLAGS) -o $@ $(LDLIBS)
 
 $(LIBOPUS): $(OPUS_OBJS)
 	$(AR) rcs $@ $^
@@ -229,15 +420,25 @@ $(LIBOPUS): $(OPUS_OBJS)
 $(LIBMBEDTLS): $(MBEDTLS_OBJS)
 	$(AR) rcs $@ $^
 
+$(BUILD_DIR)/version_string.o: $(BUILD_DIR)/version_string.c version.h
+	$(CC) -c $(MY_CFLAGS) -o $@ $<
+
 # Compile main app sources
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) -c $(MY_CFLAGS) -o $@ $<
 
+# A C++ object writes its dependency file under a name of its own. A file with
+# the C name can remain from a C source of the same name, and it names a source
+# that is gone.
+$(OBJ_DIR)/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) -c $(MY_CXXFLAGS) -MF $(@:.o=.cpp.d) -o $@ $<
+
 # Compile sources that live outside src/ (see EXT_SRC above) into their own
 # per-platform subdirectory instead of $(OBJ_DIR)/%.o, so they can't collapse
 # to a path shared with another platform's build.
-$(OBJ_DIR)/ext/%.o: ../../%.c
+$(OBJ_DIR)/ext/%.o: $(NEXTUI_ROOT)/%.c
 	@mkdir -p $(@D)
 	$(CC) -c $(MY_CFLAGS) -o $@ $<
 
@@ -258,11 +459,12 @@ $(MBEDTLS_OBJ_DIR)/%.o: %.c
 	$(CC) -c $(MBEDTLS_CFLAGS) -o $@ $<
 
 clean:
-	rm -f $(PRODUCT)
+	rm -f $(PRODUCT) $(PRODUCT_KIND)
 	rm -rf $(BUILD_DIR)
 	rm -rf opus_obj
 
 # Auto-generated header dependency files
--include $(APP_OBJS:.o=.d)
+-include $(patsubst %.o,%.d,$(filter-out $(CXX_OBJS),$(APP_OBJS)))
+-include $(CXX_OBJS:.o=.cpp.d)
 -include $(OPUS_OBJS:.o=.d)
 -include $(MBEDTLS_OBJS:.o=.d)

@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "radio_curated.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +6,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "include/parson/parson.h"
 
 // Maximum limits

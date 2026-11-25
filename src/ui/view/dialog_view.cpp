@@ -1,0 +1,94 @@
+#include "ui/view/dialog_view.hpp"
+
+#include <algorithm>
+
+#include "ui/view/rounded_rect.hpp"
+#include "ui_theme.h"
+
+// The NextUI headers declare C functions and have no guard of their own
+extern "C" {
+#include "defines.h"
+#include "api.h"
+}
+
+namespace {
+
+void fill(SDL_Surface* surface, const SDL_Rect& rect, SDL_Color color) {
+    SDL_FillRect(surface, &rect, SDL_MapRGBA(surface->format, color.r, color.g, color.b, 255));
+}
+
+}  // namespace
+
+void DialogFrameView::setEdgeColor(SDL_Color color) {
+    if (hasEdgeColor && color.r == edgeColor.r && color.g == edgeColor.g && color.b == edgeColor.b) return;
+    hasEdgeColor = true;
+    edgeColor    = color;
+    dirty        = true;
+}
+
+void DialogFrameView::setBorderless(bool value) {
+    if (value == borderless) return;
+    borderless = value;
+    dirty      = true;
+}
+
+void DialogFrameView::draw(UiDrawContext& context) {
+    dirty                = false;
+    SDL_Surface* surface = context.getSurface();
+    if (!surface) return;
+    const int w      = surface->w;
+    const int h      = surface->h;
+    // The canvas rounds its surfaces at 28 px of 768: half of it at the scale of the device
+    const SDL_Color edge = hasEdgeColor ? edgeColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
+    renderRoundedRect(static_cast<uint32_t*>(surface->pixels), w, h, surface->pitch / 4,
+                      RoundedRectStyle{Theme_getColor(THEME_ROLE_SURFACE_BACKGROUND, false), edge,
+                                       borderless ? 0 : SCALE1(1), SCALE1(14)});
+}
+
+DialogView::DialogView(int width, Alignment alignment, TTF_Font* titleFont, TTF_Font* hintFont)
+    : width(width), alignment(alignment), title(titleFont, true), hint(hintFont, true) {
+    title.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+    hint.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+}
+
+void DialogView::layout(UiLayoutContext& context) {
+    const UiSize space        = context.getMaxSize();
+    const int padding         = SCALE1(15);
+    const int top             = SCALE1(12);
+    const int gap             = SCALE1(10);
+    UiLayoutContext measuring = context.createMeasuringContext();
+    const int textWidth       = width - 2 * padding;
+    const int titleHeight = measuring.layoutChild(title, SDL_Rect{0, 0, textWidth, space.h}).getSize().h;
+    const int hintHeight  = measuring.layoutChild(hint, SDL_Rect{0, 0, textWidth, space.h}).getSize().h;
+    const UiSize contentSize =
+        content ? measuring.layoutChild(*content, SDL_Rect{0, 0, textWidth, space.h}).getSize() : UiSize{};
+    const int contentHeight = contentSize.h;
+    const int bodyHeight = content ? contentHeight + gap : 0;
+    const int height      = top + titleHeight + gap + bodyHeight + hintHeight + gap;
+
+    SDL_Rect surface = {(space.w - width) / 2, (space.h - height) / 2, width, height};
+    // A tall dialog keeps the row of the button hints visible: it goes up, never under the row
+    const int barTop = space.h - SCALE1(PADDING) - SCALE1(PILL_SIZE) - SCALE1(PADDING) / 2;
+    if (surface.y + height > barTop) surface.y = std::max(SCALE1(PADDING) / 2, barTop - height);
+    context.layoutChild(frame, surface);
+    layoutText(context, measuring, title, surface, surface.y + top);
+    int y = surface.y + top + titleHeight + gap;
+    if (content) {
+        const int x = alignment == Alignment::Center ? surface.x + (surface.w - contentSize.w) / 2
+                                                     : surface.x + padding;
+        // The same width as the measure, thus a text with an ellipsis does not render again
+        context.layoutChild(*content, SDL_Rect{x, y, textWidth, contentHeight});
+        y += contentHeight + gap;
+    }
+    layoutText(context, measuring, hint, surface, y);
+}
+
+void DialogView::layoutText(UiLayoutContext& context, UiLayoutContext& measuring, TextView& text,
+                            const SDL_Rect& surface, int y) {
+    const int padding   = SCALE1(15);
+    const int textWidth = surface.w - 2 * padding;
+    const UiSize size   = measuring.layoutChild(text, SDL_Rect{0, 0, textWidth, surface.h}).getSize();
+    const int x = alignment == Alignment::Center ? surface.x + (surface.w - size.w) / 2 : surface.x + padding;
+    // The same width as the measure, thus a text with an ellipsis does not render again
+    context.layoutChild(text, SDL_Rect{x, y, textWidth, size.h});
+}

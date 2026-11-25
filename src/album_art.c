@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "album_art.h"
 #include "wget_fetch.h"
 #include <stdio.h>
@@ -12,6 +11,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "include/parson/parson.h"
 
 #include <SDL2/SDL.h>
@@ -186,13 +186,13 @@ static void* fetch_thread_func(void* arg) {
     }
 
     // Fetch iTunes API response
-    uint8_t* response_buf = (uint8_t*)malloc(32 * 1024);
+    char* response_buf = (char*)malloc(32 * 1024);
     if (!response_buf) {
         art_ctx.result_ready = true;
         return NULL;
     }
 
-    int bytes = wget_fetch(search_url, response_buf, 32 * 1024);
+    int bytes = wget_fetch_string(search_url, response_buf, 32 * 1024);
     if (bytes <= 0) {
         LOG_error("Failed to fetch iTunes search results\n");
         free(response_buf);
@@ -200,10 +200,9 @@ static void* fetch_thread_func(void* arg) {
         return NULL;
     }
 
-    response_buf[bytes] = '\0';
 
     // Parse JSON response
-    JSON_Value* root = json_parse_string((const char*)response_buf);
+    JSON_Value* root = json_parse_string(response_buf);
     free(response_buf);
 
     if (!root) {
@@ -244,7 +243,7 @@ static void* fetch_thread_func(void* arg) {
     char large_artwork_url[512];
     if (strncmp(artwork_url, "https://", 8) == 0) {
         const char* after_https = artwork_url + 8;
-        char* ssl_pos = strstr(after_https, "-ssl.");
+        char* ssl_pos = (char*)strstr(after_https, "-ssl.");
         if (ssl_pos) {
             int prefix_len = ssl_pos - after_https;
             snprintf(large_artwork_url, sizeof(large_artwork_url), "http://%.*s%s",
@@ -272,7 +271,7 @@ static void* fetch_thread_func(void* arg) {
         return NULL;
     }
 
-    int image_bytes = wget_fetch(large_artwork_url, image_buf, 1024 * 1024);
+    int image_bytes = wget_fetch_bytes(large_artwork_url, image_buf, 1024 * 1024);
     if (image_bytes <= 0) {
         LOG_error("Failed to download album art image (bytes=%d)\n", image_bytes);
         free(image_buf);

@@ -7,6 +7,12 @@ cd "$DIR"
 
 export LD_LIBRARY_PATH="$DIR:$DIR/bin:$DIR/bin/$PLATFORM:$LD_LIBRARY_PATH:/usr/bin"
 
+# With its thread-safe PCM locking, alsa-lib leaves a lock held on some BlueALSA
+# streams: the SDL audio thread then never runs (no sound over Bluetooth), and the
+# close of the device waits for it (a hang on exit). Only the SDL audio thread
+# drives the PCM, thus the locking gives nothing here. NextUI issue #810, PR #811.
+export LIBASOUND_THREAD_SAFE=0
+
 CPU_FREQ=/sys/devices/system/cpu/cpu0/cpufreq
 
 # Save current CPU scaling state and restore on exit (including crash)
@@ -25,5 +31,13 @@ echo conservative > "$CPU_FREQ/scaling_governor"
 cat "$CPU_FREQ/cpuinfo_min_freq" > "$CPU_FREQ/scaling_min_freq"
 cat "$CPU_FREQ/cpuinfo_max_freq" > "$CPU_FREQ/scaling_max_freq"
 
-# Run the platform-specific binary
-"$DIR/bin/$PLATFORM/musicplayer.elf" &> "$LOGS_PATH/music-player.txt"
+# Restart hook: if the flag file is present when the app exits, launch it again.
+# Used to bring the app back up after a self-update, and by ./dev install --run.
+RESTART_FLAG_FILE=/tmp/nextui-music-player.restart
+
+while :; do
+	rm -f "$RESTART_FLAG_FILE"
+	"$DIR/bin/$PLATFORM/musicplayer.elf" > "$LOGS_PATH/music-player.txt" 2>&1
+
+	[ -e "$RESTART_FLAG_FILE" ] || break
+done

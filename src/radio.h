@@ -1,6 +1,10 @@
 #ifndef __RADIO_H__
 #define __RADIO_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -50,20 +54,26 @@ typedef enum {
     RADIO_STATE_ERROR
 } RadioState;
 
-// Initialize radio module
+// Initialize radio module. Returns 0 when the radio is ready, and -1 when it is not.
 int Radio_init(void);
 
-// Cleanup
+// Stops the radio and frees it. Does nothing when the radio is not ready.
 void Radio_quit(void);
 
 // Get list of preset stations
 int Radio_getStations(RadioStation** stations);
 
+// Returns the index in `stations` of the station to play after the station of `url`, or before it
+// when `next` is false, or -1 when no other station can play. The step wraps at each end. A `url`
+// that is not in the list, or NULL, steps to the first station, or to the last one when `next` is
+// false.
+int Radio_pickStation(const RadioStation* stations, int count, const char* url, bool next);
+
 // Add a custom station
 int Radio_addStation(const char* name, const char* url, const char* genre, const char* slogan);
 
 // Remove a station by index
-void Radio_removeStation(int index);
+bool Radio_removeStation(int index);
 
 // Save stations to file
 void Radio_saveStations(void);
@@ -83,8 +93,9 @@ RadioState Radio_getState(void);
 // Get current/last played URL (for resume functionality)
 const char* Radio_getCurrentUrl(void);
 
-// Find the index of the currently playing station in the station list (-1 if not found)
-int Radio_findCurrentStationIndex(void);
+// Take away the title, the artist and the bitrate of the station that played.
+// A station that the user leaves keeps none of them on the screen of the next.
+void Radio_clearMetadata(void);
 
 // Get current metadata
 const RadioMetadata* Radio_getMetadata(void);
@@ -117,5 +128,9 @@ struct SDL_Surface* Radio_getAlbumArt(void);
 
 // Check if user has custom stations (vs using defaults)
 bool Radio_hasUserStations(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

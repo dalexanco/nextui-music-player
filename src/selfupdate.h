@@ -1,16 +1,22 @@
 #ifndef __SELFUPDATE_H__
 #define __SELFUPDATE_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // GitHub repository (format: "owner/repo")
+// Watched by launch.sh: present when the app exits means launch it again
+#define SELFUPDATE_RESTART_FLAG "/tmp/nextui-music-player.restart"
+
 #define APP_GITHUB_REPO "nborodikhin/nextui-music-player"
 
 // Release asset name pattern (the .pak.zip file)
 #define APP_RELEASE_ASSET "Music.Player.pak.zip"
 
 // Fallback version if version file not found
-#define APP_VERSION_FALLBACK "0.0.0"
 
 // Self-update module states
 typedef enum {
@@ -22,6 +28,17 @@ typedef enum {
     SELFUPDATE_STATE_COMPLETED,     // Ready for restart
     SELFUPDATE_STATE_ERROR
 } SelfUpdateState;
+
+// What the About screen is showing, and therefore what A does there. Derived
+// from one snapshot so the status text and the button hint cannot disagree.
+typedef enum {
+    UPDATE_UI_UNCHECKED,   // no check has run yet
+    UPDATE_UI_CHECKING,
+    UPDATE_UI_AVAILABLE,   // a newer version exists
+    UPDATE_UI_CURRENT,     // checked, nothing newer
+    UPDATE_UI_FAILED,
+    UPDATE_UI_RESTART      // an update is installed, the restart is due
+} UpdateUiState;
 
 // Update status information
 typedef struct {
@@ -41,7 +58,6 @@ typedef struct {
 
 // Initialize self-update module
 // pak_path: path to the .pak directory
-// Reads version from state/app_version.txt
 // Returns 0 on success, -1 on error
 int SelfUpdate_init(const char* pak_path);
 
@@ -55,15 +71,25 @@ const char* SelfUpdate_getVersion(void);
 // Returns 0 if check started, -1 if already running
 int SelfUpdate_checkForUpdate(void);
 
-// Start the update process (download + extract + apply)
+// Start the update process in the background(download + extract + apply).
+// A snapshot of the status is available via SelfUpdate_getStatus().
+//
 // Returns 0 if update started, -1 if already running or no update available
 int SelfUpdate_startUpdate(void);
 
 // Cancel ongoing update
 void SelfUpdate_cancelUpdate(void);
 
-// Get current status
-const SelfUpdateStatus* SelfUpdate_getStatus(void);
+// Forgets the result of the last check, after a change of the update channel.
+// A running check completes, and its result is discarded. An update that runs
+// or waits for the restart does not change.
+void SelfUpdate_forgetCheck(void);
+
+// Get the snapshot of the current status.
+SelfUpdateStatus SelfUpdate_getStatus(void);
+
+// Boil the status down to what a screen needs to show and offer.
+UpdateUiState SelfUpdate_uiState(const SelfUpdateStatus* status);
 
 // Update function (call from main loop)
 void SelfUpdate_update(void);
@@ -71,7 +97,22 @@ void SelfUpdate_update(void);
 // Check if restart is required to apply update
 bool SelfUpdate_isPendingRestart(void);
 
+// Touch the flag launch.sh watches for, so the app comes back up by itself
+// after it exits. Without it the user is dropped back to NextUI and has to
+// launch again by hand.
+void SelfUpdate_requestRestart(void);
+
 // Get current state
 SelfUpdateState SelfUpdate_getState(void);
+
+// Deletes each path in install_dir that pak_dir does not carry, except the paths
+// that the device writes. Keeps a directory that holds such a path, also when
+// pak_dir does not carry that directory, and deletes the rest of its contents.
+// pak_dir is the unpacked pak of the update. install_dir is the installed app.
+void SelfUpdate_removeObsoleteFiles(const char* pak_dir, const char* install_dir);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

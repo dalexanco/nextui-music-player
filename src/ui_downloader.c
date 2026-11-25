@@ -6,6 +6,8 @@
 #include "ui_downloader.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_layers.h"
+#include "ui_theme.h"
 #include "ui_icons.h"
 #include "module_common.h"
 
@@ -60,7 +62,7 @@ static const char* youtube_menu_get_label(int index, const char* default_label,
 
 // Render YouTube sub-menu
 void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                         char* toast_message, uint32_t toast_time) {
+                         int menu_scroll) {
     SimpleMenuConfig config = {
         .title = "Downloader",
         .items = youtube_menu_items,
@@ -70,10 +72,7 @@ void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_sele
         .render_badge = NULL,
         .get_icon = NULL
     };
-    render_simple_menu(screen, show_setting, menu_selected, &config);
-
-    // Toast notification
-    render_toast(screen, toast_message, toast_time);
+    render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
 }
 
 // Render YouTube searching status
@@ -88,19 +87,29 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
     // Searching message
     char search_msg[300];
     snprintf(search_msg, sizeof(search_msg), "Searching for: %s", search_query);
-    SDL_Surface* query_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), search_msg, COLOR_GRAY);
+    SDL_Surface* query_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), search_msg, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (query_text) {
         int qx = (hw - query_text->w) / 2;
         if (qx < SCALE1(PADDING)) qx = SCALE1(PADDING);
-        SDL_BlitSurface(query_text, NULL, screen, &(SDL_Rect){qx, hh / 2 - SCALE1(30)});
+        SDL_Rect query_at = {
+            .x = qx,
+            .y = hh / 2 - SCALE1(30),
+        };
+        SDL_BlitSurface(query_text, NULL, screen, &query_at);
         SDL_FreeSurface(query_text);
     }
 
     // Loading indicator
     const char* loading = "Please wait...";
-    SDL_Surface* load_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), loading, COLOR_WHITE);
+    SDL_Surface* load_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), loading, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (load_text) {
-        SDL_BlitSurface(load_text, NULL, screen, &(SDL_Rect){(hw - load_text->w) / 2, hh / 2 + SCALE1(10)});
+        SDL_Rect load_at = {
+            .x = (hw - load_text->w) / 2,
+            .y = hh / 2 + SCALE1(10),
+        };
+        SDL_BlitSurface(load_text, NULL, screen, &load_at);
         SDL_FreeSurface(load_text);
     }
 }
@@ -109,8 +118,7 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
 void render_downloader_results(SDL_Surface* screen, int show_setting,
                             const char* search_query,
                             DownloaderResult* results, int result_count,
-                            int selected, int* scroll,
-                            char* toast_message, uint32_t toast_time, bool searching) {
+                            int selected, int* scroll, bool searching) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -130,12 +138,6 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
         adjust_list_scroll(selected, scroll, layout.items_per_page);
     }
 
-    // Reserve space for duration on the right (format: "99:59" max)
-    int dur_w, dur_h;
-    TTF_SizeUTF8(Fonts_getTiny(), "99:59", &dur_w, &dur_h);
-    int duration_reserved = dur_w + SCALE1(PADDING * 2);  // Duration width + gap
-    int max_width = layout.max_width - duration_reserved;
-
     for (int i = 0; i < layout.items_per_page && *scroll + i < result_count; i++) {
         int idx = *scroll + i;
         DownloaderResult* result = &results[idx];
@@ -152,21 +154,53 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
             indicator_width = ind_w + SCALE1(4);
         }
 
-        // Calculate text width for pill sizing
-        int pill_width = Fonts_calcListPillWidth(Fonts_getMedium(), result->title, truncated, max_width, indicator_width);
+        // Four steps, in this order: the band of a selected row, the label at
+        // the right edge, the pill of the title, then the title. The width of
+        // the label is what the title gives up, thus the two never overlap.
+        char dur[16] = {0};
+        int duration_width = 0;
+        if (result->duration_sec > 0) {
+            int m = result->duration_sec / 60;
+            int s2 = result->duration_sec % 60;
+            snprintf(dur, sizeof(dur), "%d:%02d", m, s2);
+            TTF_SizeUTF8(Fonts_getTiny(), dur, &duration_width, NULL);
+        }
 
-        // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, layout.item_h};
-        Fonts_drawListItemBg(screen, &pill_rect, is_selected);
+        if (is_selected && duration_width > 0) {
+            SDL_Rect band = {SCALE1(PADDING), y, layout.max_width, layout.item_h};
+            draw_list_item_band(screen, &band);
+        }
 
-        int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (layout.item_h - TTF_FontHeight(Fonts_getMedium())) / 2;
+        if (duration_width > 0) {
+            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(
+                Fonts_getTiny(), dur, Theme_getColor(THEME_ROLE_PRIMARY, false));
+            if (dur_text) {
+                SDL_Rect dur_at = {
+                    .x = hw - dur_text->w - SCALE1(PADDING * 2),
+                    .y = y + (layout.item_h - dur_text->h) / 2,
+                };
+                SDL_BlitSurface(dur_text, NULL, screen, &dur_at);
+                SDL_FreeSurface(dur_text);
+            }
+        }
+
+        ListItemPos pos = render_list_item_pill_right(screen, &layout, result->title,
+                                                      truncated, y, is_selected,
+                                                      indicator_width, duration_width);
+        int pill_width = pos.pill_width;
+        int title_x = pos.text_x;
+        int text_y = pos.text_y;
 
         // Show indicator if already in queue
         if (in_queue) {
-            SDL_Surface* indicator = TTF_RenderUTF8_Blended(Fonts_getTiny(), "[+]", is_selected ? uintToColour(THEME_COLOR5_255) : COLOR_GRAY);
+            SDL_Surface* indicator = TTF_RenderUTF8_Blended(
+                Fonts_getTiny(), "[+]", Theme_getColor(THEME_ROLE_PRIMARY, is_selected));
             if (indicator) {
-                SDL_BlitSurface(indicator, NULL, screen, &(SDL_Rect){title_x, y + (layout.item_h - indicator->h) / 2});
+                SDL_Rect indicator_at = {
+                    .x = title_x,
+                    .y = y + (layout.item_h - indicator->h) / 2,
+                };
+                SDL_BlitSurface(indicator, NULL, screen, &indicator_at);
                 title_x += indicator->w + SCALE1(4);
                 SDL_FreeSurface(indicator);
             }
@@ -174,38 +208,32 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
 
         // Title - use common text rendering with scrolling for selected items
         int title_max_w = pill_width - SCALE1(BUTTON_PADDING * 2) - indicator_width;
-        render_list_item_text(screen, &downloader_results_scroll_text, result->title, Fonts_getMedium(),
+        // A selected row scrolls the whole title. Another row shows the title
+        // that the pill cut, thus its end lands on a character.
+        render_list_item_text(screen, &downloader_results_scroll_text,
+                              is_selected ? result->title : truncated, Fonts_getMedium(),
                               title_x, text_y, title_max_w, is_selected);
 
-        // Duration (always on right, outside pill)
-        if (result->duration_sec > 0) {
-            char dur[16];
-            int m = result->duration_sec / 60;
-            int s = result->duration_sec % 60;
-            snprintf(dur, sizeof(dur), "%d:%02d", m, s);
-            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), dur, COLOR_GRAY);
-            if (dur_text) {
-                SDL_BlitSurface(dur_text, NULL, screen, &(SDL_Rect){hw - dur_text->w - SCALE1(PADDING * 2), y + (layout.item_h - dur_text->h) / 2});
-                SDL_FreeSurface(dur_text);
-            }
-        }
     }
 
     // Empty results message
     if (result_count == 0) {
         const char* msg = searching ? "Searching..." : "No results found";
-        SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getLarge(), msg, COLOR_GRAY);
+        SDL_Surface* text = TTF_RenderUTF8_Blended(
+            Fonts_getLarge(), msg, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, hh / 2 - text->h / 2});
+            SDL_Rect text_at = {
+                .x = (hw - text->w) / 2,
+                .y = hh / 2 - text->h / 2,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at);
             SDL_FreeSurface(text);
         }
     }
 
-    // Toast notification (rendered to GPU layer above scroll text)
-    render_toast(screen, toast_message, toast_time);
-
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
 
     // Dynamic hint based on queue status (only show A action if item is selected)
     if (selected >= 0 && result_count > 0) {
@@ -214,9 +242,11 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
         if (Downloader_isInQueue(selected_result->video_id)) {
             action_hint = "QUEUED";
         }
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", (char*)action_hint, NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", "A", action_hint, NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     }
 }
 
@@ -230,13 +260,13 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
 
     int qcount = 0;
     DownloaderQueueItem* queue = Downloader_queueGet(&qcount);
-    const DownloaderDownloadStatus* dl_status = Downloader_getDownloadStatus();
+    const DownloaderDownloadStatus dl_status = Downloader_getDownloadStatus();
 
     // Title with completion count
     char title[64];
-    if (dl_status->total_items > 0) {
+    if (dl_status.total_items > 0) {
         snprintf(title, sizeof(title), "Downloads (%d/%d)",
-                 dl_status->completed_count, dl_status->total_items);
+                 dl_status.completed_count, dl_status.total_items);
     } else {
         snprintf(title, sizeof(title), "Download Queue");
     }
@@ -246,15 +276,15 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
     if (qcount == 0) {
         downloader_queue_clear_scroll();
         render_empty_state(screen, "Queue is empty", "Search and add songs to download", NULL);
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
         return;
     }
 
     // Two-row pill layout (like podcast download queue)
     ListLayout layout = calc_list_layout(screen);
-    layout.item_h = SCALE1(PILL_SIZE) * 3 / 2;
-    layout.items_per_page = layout.list_h / layout.item_h;
-    if (layout.items_per_page > 5) layout.items_per_page = 5;
+    layout.item_h = layout.rich_item_h;
+    layout.items_per_page = layout.rich_items_per_page;
     adjust_list_scroll(queue_selected, queue_scroll, layout.items_per_page);
 
     for (int i = 0; i < layout.items_per_page && *queue_scroll + i < qcount; i++) {
@@ -294,7 +324,7 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
 
         // Title text (row 1)
         render_list_item_text(screen, is_selected ? &downloader_queue_scroll_text : NULL,
-                              item->title, Fonts_getMedium(),
+                              is_selected ? item->title : truncated, Fonts_getMedium(),
                               pos.text_x, pos.text_y,
                               pos.text_max_width, is_selected);
 
@@ -306,15 +336,16 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
             int bar_x = pos.subtitle_x;
             int bar_y = pos.subtitle_y + (TTF_FontHeight(Fonts_getSmall()) - bar_h) / 2;
 
-            // Bar background
             SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
-            SDL_FillRect(screen, &bar_bg, SDL_MapRGB(screen->format, 60, 60, 60));
+            SDL_FillRect(screen, &bar_bg,
+                         Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, is_selected));
 
             // Bar fill
             int fill_w = (bar_w * item->progress_percent) / 100;
             if (fill_w > 0) {
                 SDL_Rect bar_fill = {bar_x, bar_y, fill_w, bar_h};
-                SDL_FillRect(screen, &bar_fill, THEME_COLOR2);
+                SDL_FillRect(screen, &bar_fill,
+                             Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, is_selected));
             }
 
             // Speed and ETA text
@@ -332,44 +363,69 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
                          item->progress_percent, speed_str);
             }
 
-            SDL_Surface* info_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), info_str, COLOR_GRAY);
+            SDL_Surface* info_surf = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), info_str,
+                Theme_getColor(THEME_ROLE_SECONDARY, is_selected));
             if (info_surf) {
                 int info_x = bar_x + bar_w + SCALE1(6);
                 int avail_w = pos.text_max_width - bar_w - SCALE1(6);
                 SDL_Rect src = {0, 0, info_surf->w > avail_w ? avail_w : info_surf->w, info_surf->h};
-                SDL_BlitSurface(info_surf, &src, screen, &(SDL_Rect){info_x, pos.subtitle_y});
+                SDL_Rect info_at = {
+                    .x = info_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(info_surf, &src, screen, &info_at);
                 SDL_FreeSurface(info_surf);
             }
         } else if (item->status == DOWNLOADER_STATUS_PENDING) {
-            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Queued", COLOR_GRAY);
+            SDL_Surface* s = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), "Queued",
+                Theme_getColor(THEME_ROLE_SECONDARY, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at);
                 SDL_FreeSurface(s);
             }
         } else if (item->status == DOWNLOADER_STATUS_FAILED) {
-            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Failed", (SDL_Color){200, 80, 80, 255});
+            SDL_Surface* s = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), "Failed", Theme_getColor(THEME_ROLE_STATUS_ERROR, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at2 = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at2);
                 SDL_FreeSurface(s);
             }
         } else if (item->status == DOWNLOADER_STATUS_COMPLETE) {
-            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Complete", (SDL_Color){80, 200, 80, 255});
+            SDL_Surface* s = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), "Complete", Theme_getColor(THEME_ROLE_STATUS_SUCCESS, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at3 = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at3);
                 SDL_FreeSurface(s);
             }
         }
     }
 
     // Scroll indicators
-    render_scroll_indicators(screen, *queue_scroll, layout.items_per_page, qcount);
+    render_scroll_indicators(screen, &layout, *queue_scroll, qcount);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (qcount > 0) {
-        GFX_blitButtonGroup((char*[]){"X", "REMOVE", "B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"X", "REMOVE", "B", "BACK", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     }
 }
 
@@ -405,14 +461,12 @@ void downloader_queue_animate_scroll(void) {
 
 // Clear YouTube queue scroll state (call when queue items are removed)
 void downloader_queue_clear_scroll(void) {
-    memset(&downloader_queue_scroll_text, 0, sizeof(downloader_queue_scroll_text));
-    GFX_clearLayers(LAYER_SCROLLTEXT);
+    ScrollText_forget(&downloader_queue_scroll_text);
+    UiLayer_clear(UI_LAYER_ANIMATION);
 }
 
-// Clear YouTube results scroll state and toast
+// Clear YouTube results scroll state
 void downloader_results_clear_scroll(void) {
-    memset(&downloader_results_scroll_text, 0, sizeof(downloader_results_scroll_text));
-    GFX_clearLayers(LAYER_SCROLLTEXT);
-    clear_toast();
+    ScrollText_forget(&downloader_results_scroll_text);
+    UiLayer_clear(UI_LAYER_ANIMATION);
 }
-

@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "radio_net.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +14,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 
 // zlib for gzip decompression (some CDNs send gzip despite Accept-Encoding: identity)
 #include <zlib.h>
@@ -174,6 +177,9 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
             LOG_error("[RadioNet] mbedtls_ssl_config_defaults failed: %d\n", ssl_ret);
             goto cleanup;
         }
+        mbedtls_ssl_conf_max_tls_version(
+            &ssl_ctx->conf, MBEDTLS_SSL_VERSION_TLS1_2
+        );
         mbedtls_ssl_conf_authmode(&ssl_ctx->conf, MBEDTLS_SSL_VERIFY_NONE);
         mbedtls_ssl_conf_rng(&ssl_ctx->conf, mbedtls_ctr_drbg_random, &ssl_ctx->ctr_drbg);
 
@@ -309,12 +315,15 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
         LOG_error("[RadioNet] Failed to allocate header buffer\n");
         goto cleanup;
     }
-    int header_pos = 0;
-    bool headers_done = false;
+    int header_pos;
+    header_pos = 0;
+    bool headers_done;
+    headers_done = false;
 
     // Read headers with timeout protection
-    int header_retries = 0;
-    const int max_header_retries = 150;  // 150 * 10ms = 1.5 seconds max for headers
+    int header_retries;
+    header_retries = 0;
+    static const int max_header_retries = 150;  // 150 * 10ms = 1.5 seconds max for headers
     while (header_pos < HEADER_BUF_SIZE - 1) {
         char c;
         int r;
@@ -350,10 +359,12 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
     }
 
     // Find end of first line (status line) for redirect detection
-    char* first_line_end = strstr(header_buf, "\r\n");
+    char* first_line_end;
+    first_line_end = strstr(header_buf, "\r\n");
 
     // Check for redirect - only check the status line (first line), not entire headers
-    bool is_redirect = false;
+    bool is_redirect;
+    is_redirect = false;
     if (first_line_end) {
         char* status_start = strstr(header_buf, "HTTP/");
         if (status_start && status_start < first_line_end) {
@@ -403,7 +414,8 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
     }
 
     // Check HTTP status code - reject 4xx/5xx errors
-    int http_status = 0;
+    int http_status;
+    http_status = 0;
     {
         char* status_ptr = strstr(header_buf, "HTTP/");
         if (status_ptr) {
@@ -437,7 +449,8 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
 
     // Check for chunked transfer encoding
     // Look for "chunked" in the Transfer-Encoding header value, tolerant of whitespace
-    bool is_chunked = false;
+    bool is_chunked;
+    is_chunked = false;
     {
         char* te = strcasestr(header_buf, "\nTransfer-Encoding:");
         if (te) {
@@ -452,9 +465,11 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
     }
 
     // Read body with timeout protection
-    int total_read = 0;
-    int read_retries = 0;
-    const int max_read_retries = 50;  // Limit retries on WANT_READ/WANT_WRITE
+    int total_read;
+    total_read = 0;
+    int read_retries;
+    read_retries = 0;
+    static const int max_read_retries = 50;  // Limit retries on WANT_READ/WANT_WRITE
 
     if (is_chunked) {
         // Handle chunked transfer encoding - read and decode incrementally
@@ -579,7 +594,8 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
     }
 
     // Decompress gzip if Content-Encoding indicates it or gzip magic bytes detected
-    bool is_gzip = false;
+    bool is_gzip;
+    is_gzip = false;
     if (header_buf) {
         char* ce = strcasestr(header_buf, "\nContent-Encoding:");
         if (ce) {
@@ -698,12 +714,17 @@ int radio_net_resolve_url(const char* url, char* resolved_url, int resolved_url_
                                        (const unsigned char*)pers, strlen(pers)) != 0 ||
                 mbedtls_ssl_config_defaults(&ssl_ctx->conf, MBEDTLS_SSL_IS_CLIENT,
                                             MBEDTLS_SSL_TRANSPORT_STREAM,
-                                            MBEDTLS_SSL_PRESET_DEFAULT) != 0 ||
-                mbedtls_ssl_setup(&ssl_ctx->ssl, &ssl_ctx->conf) != 0) {
+                                            MBEDTLS_SSL_PRESET_DEFAULT) != 0) {
                 goto resolve_cleanup;
             }
+            mbedtls_ssl_conf_max_tls_version(
+                &ssl_ctx->conf, MBEDTLS_SSL_VERSION_TLS1_2
+            );
             mbedtls_ssl_conf_authmode(&ssl_ctx->conf, MBEDTLS_SSL_VERIFY_NONE);
             mbedtls_ssl_conf_rng(&ssl_ctx->conf, mbedtls_ctr_drbg_random, &ssl_ctx->ctr_drbg);
+            if (mbedtls_ssl_setup(&ssl_ctx->ssl, &ssl_ctx->conf) != 0) {
+                goto resolve_cleanup;
+            }
             mbedtls_ssl_set_hostname(&ssl_ctx->ssl, host);
 
             char port_str[16];
@@ -770,7 +791,8 @@ int radio_net_resolve_url(const char* url, char* resolved_url, int resolved_url_
 
         // Read response headers
         char header_buf[4096];
-        int header_pos = 0;
+        int header_pos;
+        header_pos = 0;
         while (header_pos < (int)sizeof(header_buf) - 1) {
             char c;
             int r;
@@ -802,8 +824,10 @@ int radio_net_resolve_url(const char* url, char* resolved_url, int resolved_url_
         }
 
         // Check for redirect
-        bool is_redirect = false;
-        char* first_line_end = strstr(header_buf, "\r\n");
+        bool is_redirect;
+        is_redirect = false;
+        char* first_line_end;
+        first_line_end = strstr(header_buf, "\r\n");
         if (first_line_end) {
             is_redirect = (strstr(header_buf, " 301 ") && strstr(header_buf, " 301 ") < first_line_end) ||
                          (strstr(header_buf, " 302 ") && strstr(header_buf, " 302 ") < first_line_end) ||
