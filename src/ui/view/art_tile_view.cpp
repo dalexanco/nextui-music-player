@@ -16,12 +16,40 @@ namespace {
 constexpr int kLightMixPercent = 20;
 constexpr int kDarkMixPercent  = 55;
 
+/** The opacity of the white of the glyph: 80% */
+constexpr uint8_t kGlyphAlpha = 204;
+
 }  // namespace
+
+ArtGlyph getArtGlyphOfSource(ThemeSource source) {
+    switch (source) {
+        case THEME_SOURCE_MUSIC: return ArtGlyph::Music;
+        case THEME_SOURCE_RADIO: return ArtGlyph::Radio;
+        case THEME_SOURCE_PODCAST: return ArtGlyph::Podcast;
+        case THEME_SOURCE_AUDIOBOOK: return ArtGlyph::Book;
+        default: return ArtGlyph::Neutral;
+    }
+}
 
 void ArtTileFallbackView::setSource(ThemeSource newSource) {
     if (newSource == source) return;
     source = newSource;
-    dirty  = true;
+    if (!glyphChosen) glyph = getArtGlyphOfSource(source);
+    dirty = true;
+}
+
+void ArtTileFallbackView::setGlyph(ArtGlyph newGlyph) {
+    if (glyphChosen && newGlyph == glyph) return;
+    glyphChosen = true;
+    glyph       = newGlyph;
+    dirty       = true;
+}
+
+void ArtTileFallbackView::clearGlyph() {
+    if (!glyphChosen) return;
+    glyphChosen = false;
+    glyph       = getArtGlyphOfSource(source);
+    dirty       = true;
 }
 
 void ArtTileFallbackView::draw(UiDrawContext& context) {
@@ -35,6 +63,7 @@ void ArtTileFallbackView::draw(UiDrawContext& context) {
     renderArtTile(static_cast<uint32_t*>(surface->pixels), surface->w, surface->h, surface->pitch / 4,
                   Theme_mix(accent, white, kLightMixPercent), Theme_mix(accent, Theme_getDeep(source), kDarkMixPercent),
                   SCALE1(8));
+    renderArtGlyph(static_cast<uint32_t*>(surface->pixels), surface->w, surface->h, surface->pitch / 4, glyph, kGlyphAlpha);
 }
 
 void ArtTileView::layout(UiLayoutContext& context) {

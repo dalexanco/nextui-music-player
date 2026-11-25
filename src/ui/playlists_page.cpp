@@ -112,6 +112,7 @@ private:
         const PlaylistInfo* playlist = playlists.get(index);
         if (!playlist) return;
         panel.getArt().setFallback(THEME_SOURCE_MUSIC);
+        panel.getArt().setGlyph(ArtGlyph::Playlist);
         panel.getInfo().setLine(std::to_string(playlist->track_count) +
                                 (playlist->track_count == 1 ? " track" : " tracks"));
     }
