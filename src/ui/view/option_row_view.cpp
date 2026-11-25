@@ -68,6 +68,8 @@ void OptionRowView::layout(UiLayoutContext& context) {
     const SDL_Color white = Theme_getColor(THEME_ROLE_PAGE_BACKGROUND, true);
     const bool showBand   = selected && hasValue;
     const uint32_t accent = Theme_getPillAccent();
+    // Fully transparent: no color
+    //noinspection HardcodedColor
     const SDL_Color clear = {0, 0, 0, 0};
     // The band: the accent of the page, or the band color of the theme where the page has no accent
     band.setStyle(RoundedRectStyle{showBand ? (accent ? unpack(accent) : Theme_getColor(THEME_ROLE_BAND_BACKGROUND, false)) : clear,

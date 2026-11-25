@@ -39,6 +39,8 @@ void ChipView::layout(UiLayoutContext& context) {
     const UiSize textSize     = measuring.layoutChild(text, SDL_Rect{0, 0, context.getMaxSize().w, height}).getSize();
     const int width           = std::min(context.getMaxSize().w, textSize.w + 2 * padding);
     context.setSize(UiSize{width, height});
+    // Fully transparent: no color
+    //noinspection HardcodedColor
     const SDL_Color none = {0, 0, 0, 0};
     if (outline) {
         const SDL_Color edge = hasColor ? outlineColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
