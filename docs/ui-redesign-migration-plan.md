@@ -67,8 +67,7 @@ file browser (`Y OPTIONS` on a file: add to a playlist, delete), playlist tracks
 ## 3. Rules for every step
 
 - One PR per step, mergeable alone; the app stays fully usable between steps.
-- A new look is **opt-in until the end of its phase**: setting *Source colours* (off = today's look, pixel-identical).
-  The switch is removed in the final step.
+- The source-colour look is the only look (the *Source colours* setting is gone, commit `95b29a1`; its dead branches are removed in fix round 2).
 - Validation on the Brick: `./dev build brick tsps`, `./dev install device`, then the screenshots of the screens touched,
   taken with the `--test-control` channel (one command per line). Compare with `docs/audit/screens/`.
 - Unit tests for any logic extracted from a legacy module (`test/test_*.cpp`).
@@ -229,6 +228,19 @@ the file is deleted when the last one moves.
   none on the folders of the file browser; the icon cache gives each (icon, role, selected) its own surface (dark folders).
 - **Titles and margins:** Music, Radio, Podcasts; 24 px of 768 under the status row with the large title; one radio verb (LISTEN).
 
+### Fix round 2 — placeholder pictograms, rounded images, no more old look
+
+> **Status: done in the simulator, NOT validated on device.** One commit per item on `feat/ui-redesign`.
+
+- **Placeholder pictogram on the art tile — done.** `renderArtGlyph()` (`ui/view/art_glyph.*`, `test_art_glyph`) draws an anti-aliased signed-distance glyph in 80% white,
+  centred, spanning 40% of the tile, on the generated tile: note (music), radio waves (radio), microphone (podcasts), open book (audiobook), gear (neutral),
+  list (playlists), folder (`ArtGlyph::Folder`, ready for the file browser, which shows no panel on folders). `ArtTileView::setFallback(source)` picks the glyph of the
+  source; `ArtTileView::setGlyph(ArtGlyph)` overrides it (playlists page). Never any text on the tile.
+- **Rounded corners on real images — done.** `BitmapView::setCornerRadius()` (`applyRoundedCorners()` in `rounded_rect.*`, `test_rounded_rect`) multiplies the alpha of the corner
+  pixels by the rounded-rectangle coverage; `ArtTileView` uses `SCALE1(8)`, the radius of the generated tile. The full-bleed art of the players (`ArtFadeView`) stays square.
+- **Old look removed — done.** `Theme_isSourceColoursEnabled()` and all the branches and cache-key suffixes that tested it are deleted (list pages and their right texts, notes of the
+  default stations, dialogs, options panel, list rows, art fade, screen title, `TitleTextView::clearHeading()`, `DialogView::clearEdgeColor()`).
+
 ### Phase 4 — Audiobook (PR #31)
 
 **4.1 Rebase `feat/audiobook`** on the migrated base; the Audiobook list and player use `DetailPanelView`, the shared player
@@ -242,8 +254,8 @@ and `SubListPage` (chapters).
 
 ### Phase 5 — Clean-up
 
-**5.1** Remove the *Source colours* switch (new look is the only one), the legacy `ui_*.c` drawing code that nothing calls,
-and the unused `ui_utils.c` helpers. Update `README.md` screenshots and `docs/audit` ("after" set).
+**5.1** ~~Remove the *Source colours* switch~~ (**done**: the setting, `Theme_isSourceColoursEnabled()` and every branch of the old look are gone), the legacy `ui_*.c` drawing code that nothing calls,
+and the unused `ui_utils.c` helpers (**not done yet**). Update `README.md` screenshots and `docs/audit` ("after" set).
 **5.2** Empty and error states for the remaining pages (`EmptyStateView` restyled) — board `tpl-etats`.
 
 ## 5. Order and dependencies
@@ -266,7 +278,7 @@ and the unused `ui_utils.c` helpers. Update `README.md` screenshots and `docs/au
 
 ## 6. Open points
 
-- Source colours as a user setting or fixed? (Plan assumes a setting until 5.1.)
+- ~~Source colours as a user setting or fixed?~~ Fixed: the setting is removed.
 - Does the NextUI theme (user themes) override the accent, or is the accent always the source colour?
 - Podcasts: keep the speed / sleep timer in the options panel only, or also on a hint key?
 - Spectrum: confirmed removed; check nobody relies on its setting before deleting the code in 5.1.
