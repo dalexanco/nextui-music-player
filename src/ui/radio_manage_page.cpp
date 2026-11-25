@@ -49,8 +49,7 @@ public:
         Radio_getStations(&stations);
         const RadioStation& station = stations[index];
         std::string key = std::string(station.url) + '\n' + station.name + '\n' + station.genre +
-                          (RadioFavourites_isFavourite(station.url) ? "\n1" : "\n0") +
-                          (Theme_isSourceColoursEnabled() ? "\n1" : "\n0");
+                          (RadioFavourites_isFavourite(station.url) ? "\n1" : "\n0");
         const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
         return it->second;
     }
@@ -62,13 +61,6 @@ public:
         auto row = std::make_shared<ListRowView>(Fonts_getMedium());
         row->setText(station.name);
         if (RadioFavourites_isFavourite(station.url)) row->setIcon(getStarIcon(false), getStarIcon(true));
-        // The detail panel of the new look carries the genre
-        if (station.genre[0] && !Theme_isSourceColoursEnabled()) {
-            auto genre = std::make_shared<TextView>(Fonts_getTiny(), false);
-            genre->setText(station.genre);
-            genre->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            row->setRightText(std::move(genre));
-        }
         return row;
     }
 
@@ -102,7 +94,7 @@ public:
 
     void layout(UiLayoutContext& context) override {
         // An empty list has nothing to show in a panel
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() && stations.getCount() > 0 ? &panel : nullptr);
+        screenView.setSidePanel(stations.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 

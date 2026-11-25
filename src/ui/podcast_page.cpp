@@ -89,7 +89,6 @@ public:
             case RowKind::Downloads: key = "d"; break;
             case RowKind::None:      key = "?"; break;
         }
-        key += Theme_isSourceColoursEnabled() ? "\n1" : "\n0";
         const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
         return it->second;
     }
@@ -97,19 +96,16 @@ public:
     std::shared_ptr<ListItemView> getView(int index) override {
         auto row = std::make_shared<ListRowView>(Fonts_getMedium());
         int inKind = 0;
-        std::string value;
         switch (getKind(index, inKind)) {
             case RowKind::Continue: {
                 const ContinueListeningEntry* entry = Podcast_getContinueListening(inKind);
                 row->setText(entry->episode_title);
-                value = entry->feed_title;
                 break;
             }
             case RowKind::Show: {
                 const PodcastFeed* feed = Podcast_getSubscription(inKind);
                 row->setText(feed->title);
                 if (feed->new_episode_count > 0) row->setIcon(getStarIcon(false), getStarIcon(true));
-                value = std::to_string(feed->episode_count) + (feed->episode_count == 1 ? " episode" : " episodes");
                 break;
             }
             case RowKind::Downloads: {
@@ -119,13 +115,6 @@ public:
                 break;
             }
             case RowKind::None: break;
-        }
-        // The detail panel of the new look carries the values
-        if (!value.empty() && !Theme_isSourceColoursEnabled()) {
-            auto text = std::make_shared<TextView>(Fonts_getTiny(), false);
-            text->setText(value);
-            text->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            row->setRightText(std::move(text));
         }
         return row;
     }
@@ -194,7 +183,7 @@ public:
 
     void layout(UiLayoutContext& context) override {
         // An empty list has nothing to show in a panel
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() && rows.getCount() > 0 ? &panel : nullptr);
+        screenView.setSidePanel(rows.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 

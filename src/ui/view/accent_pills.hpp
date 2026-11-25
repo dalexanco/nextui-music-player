@@ -4,8 +4,8 @@
 #include "ui_theme.h"
 
 /**
- * Puts the accent of the active source in the pill colour of the platform for its lifetime. It does
- * nothing while the "Source colours" setting is off. Wrap the platform calls that draw pills.
+ * Puts the accent of the active source in the pill colour of the platform for its lifetime. Wrap
+ * the platform calls that draw pills.
  */
 class AccentPills {
 public:

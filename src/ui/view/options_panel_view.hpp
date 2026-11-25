@@ -25,9 +25,8 @@ struct OptionRow {
  * (TRACK, STATION), then the rows. The selected row shows its value between arrows, `‹ On ›`. The
  * page moves the selection and changes the values, and gives them back through setValue().
  *
- * With the setting "Source colours" on, the panel is the rounded dark surface of the board
- * `tpl-options` (no edge, rows of 84 px, an accent band only behind a value); off, it keeps the
- * square panel with a border and the list rows.
+ * The panel is the rounded dark surface of the board `tpl-options`: no edge, rows of 84 px, an
+ * accent band only behind a value.
  *
  * Give it the whole screen: it places itself with layoutOptionsPanel().
  */
@@ -62,13 +61,11 @@ private:
 
         std::vector<OptionRow> rows;
         std::vector<std::shared_ptr<ListItemView>> views;
-        // The rows of the square look, which put the value in a text view that the panel owns
-        std::vector<std::shared_ptr<TextView>> valueViews;
-        // The rows of the rounded look
+        // The same rows as `views`, to change their value
         std::vector<std::shared_ptr<OptionRowView>> optionViews;
     };
 
-    /** Makes the views of the rows for the look that the setting gives: rounded, or the old square one. */
+    /** Makes the views of the rows. */
     void buildViews();
 
     /** Shows the value of each row, between arrows for the selected row. */
@@ -79,7 +76,6 @@ private:
     TextView scopeView;
     ListView listView;
     Adapter adapter;
-    bool rounded      = false;
     bool viewsStale   = true;
 };
 

@@ -34,7 +34,7 @@ enum class LibraryItem : int8_t {
 struct LibraryRow {
     LibraryItem item;
     const char* label;
-    /** The line of the detail panel when the row has nothing better, which shows with "Source colours" */
+    /** The line of the detail panel when the row has nothing better */
     const char* description;
 };
 
@@ -83,8 +83,7 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        // The panel belongs to the source colours look, and the setting can change between frames
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        screenView.setSidePanel(&panel);
         context.layoutChild(screenView, context.getMaxRect());
     }
 

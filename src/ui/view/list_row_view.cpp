@@ -51,7 +51,6 @@ void ListRowView::setIcon(SDL_Surface* normalIcon, SDL_Surface* selectedIcon) {
 void ListRowView::setRightView(std::shared_ptr<UiView> view) {
     if (view == rightView) return;
     rightText.reset();
-    rightTextRecolored = false;
     rightView = std::move(view);
     dirty = true;
 }
@@ -62,16 +61,8 @@ void ListRowView::setRightText(std::shared_ptr<TextView> text) {
 }
 
 void ListRowView::layout(UiLayoutContext& context) {
-    extendedPill = rightView && Theme_isSourceColoursEnabled();
     if (rightText) {
-        if (extendedPill) {
-            rightText->setColor(selected ? Theme_getColor(THEME_ROLE_PRIMARY, true)
-                                         : Theme_getColor(THEME_ROLE_SECONDARY, false));
-            rightTextRecolored = true;
-        } else if (rightTextRecolored) {
-            rightText->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            rightTextRecolored = false;
-        }
+        rightText->setColor(selected ? Theme_getColor(THEME_ROLE_PRIMARY, true) : Theme_getColor(THEME_ROLE_SECONDARY, false));
     }
     // A row is as high as a selection pill
     const UiSize size       = {context.getMaxSize().w, std::min(context.getMaxSize().h, SCALE1(PILL_SIZE))};
@@ -109,13 +100,11 @@ void ListRowView::layout(UiLayoutContext& context) {
     // A text that does not fit takes all of its space, and the pill with it
     const int textSpace    = textRect.w + padding * 2 + iconOffset;
     int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2 + iconOffset);
-    // The extended pill takes the whole row, thus the right view is on it and no band shows
-    if (extendedPill) newPillWidth = size.w;
-    const int newBandWidth = rightView && !extendedPill ? size.w : 0;
-    if (newPillWidth != pillWidth || size.h != pillHeight || newBandWidth != bandWidth) {
+    // The pill takes the whole row when there is a right view, thus the view is on it
+    if (rightView) newPillWidth = size.w;
+    if (newPillWidth != pillWidth || size.h != pillHeight) {
         pillWidth  = newPillWidth;
         pillHeight = size.h;
-        bandWidth  = newBandWidth;
         dirty      = true;
     }
     context.layoutChild(shown, textRect);
@@ -127,16 +116,7 @@ void ListRowView::draw(UiDrawContext& context) {
     dirty = false;
     if (!selected) return;
     SDL_Rect pill = {0, 0, pillWidth, pillHeight};
-    if (bandWidth > 0) {
-        SDL_Rect band = {0, 0, bandWidth, pillHeight};
-        context.setContentRect(band);
-        // The fill argument marks a pill with no separate center color
-        //noinspection HardcodedColor
-        GFX_blitPillColor(ASSET_WHITE_PILL, context.getSurface(), &band,
-                          Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false), RGB_WHITE);
-    } else {
-        context.setContentRect(pill);
-    }
+    context.setContentRect(pill);
     // The fill argument marks a pill with no separate center color
     //noinspection HardcodedColor
     GFX_blitPillColor(ASSET_WHITE_PILL, context.getSurface(), &pill,

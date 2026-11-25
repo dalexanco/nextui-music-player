@@ -119,8 +119,8 @@ public:
     virtual HelpId getHelpId() const { return HELP_NONE; }
 
     /**
-     * Returns the source of the content of the page. With the setting "Source colours" on, the
-     * stack gives the page the background and the accent of its source.
+     * Returns the source of the content of the page. The stack gives the page the background and
+     * the accent of its source.
      */
     virtual ThemeSource getSource() const { return THEME_SOURCE_NEUTRAL; }
 

@@ -118,8 +118,7 @@ public:
 
     long getItemId(int index) const override {
         const CatalogEntry entry = data.get(index);
-        std::string key          = std::to_string(index) + '\n' + entry.itunesId + '\n' + entry.title + (data.isSubscribed(entry) ? "\n1" : "\n0") +
-                          (Theme_isSourceColoursEnabled() ? "\n1" : "\n0");
+        std::string key          = std::to_string(index) + '\n' + entry.itunesId + '\n' + entry.title + (data.isSubscribed(entry) ? "\n1" : "\n0");
         const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
         return it->second;
     }
@@ -129,13 +128,6 @@ public:
         auto row                 = std::make_shared<ListRowView>(Fonts_getMedium());
         row->setText(entry.title);
         if (data.isSubscribed(entry)) row->setIcon(getCheckIcon(false), getCheckIcon(true));
-        // The detail panel of the new look carries the author
-        if (!entry.author.empty() && !Theme_isSourceColoursEnabled()) {
-            auto author = std::make_shared<TextView>(Fonts_getTiny(), false);
-            author->setText(entry.author);
-            author->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            row->setRightText(std::move(author));
-        }
         return row;
     }
 
@@ -179,7 +171,7 @@ public:
 
     void layout(UiLayoutContext& context) override {
         // An empty list has nothing to show in a panel
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() && rows.getCount() > 0 ? &panel : nullptr);
+        screenView.setSidePanel(rows.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 
@@ -280,7 +272,7 @@ private:
 
     /** The cursor that rests on a show fetches its cover, one blocking call, as the old list did. */
     void fetchCoverOfSelection() {
-        if (!Theme_isSourceColoursEnabled() || pendingEntry) return;
+        if (pendingEntry) return;
         if (++idleFrames != kCoverIdleFrames) return;
         const CatalogEntry entry = data.get(list.getSelectedIndex());
         if (entry.itunesId.empty() || entry.artworkUrl.empty()) return;

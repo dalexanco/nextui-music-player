@@ -38,8 +38,7 @@ public:
     long getItemId(int index) const override {
         PodcastImportItem item;
         if (!PodcastImport_getItem(index, &item)) return index;
-        std::string key = std::to_string(index) + '\n' + item.url + '\n' + item.name + '\n' + std::to_string(item.status) +
-                          (Theme_isSourceColoursEnabled() ? "\n1" : "\n0");
+        std::string key = std::to_string(index) + '\n' + item.url + '\n' + item.name + '\n' + std::to_string(item.status);
         const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
         return it->second;
     }

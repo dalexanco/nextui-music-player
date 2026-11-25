@@ -222,7 +222,7 @@ public:
 
     HelpId getHelpId() const override { return HELP_MAIN_MENU; }
 
-    /** With source colours, the page takes the accent of the entry under the cursor */
+    /** The page takes the accent of the entry under the cursor */
     ThemeSource getSource() const override { return getItemSource(selectedItem); }
 
     void onEnter() override {
@@ -235,8 +235,7 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        // The panel belongs to the source colours look, and the setting can change between frames
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        screenView.setSidePanel(&panel);
         context.layoutChild(screenView, context.getMaxRect());
     }
 

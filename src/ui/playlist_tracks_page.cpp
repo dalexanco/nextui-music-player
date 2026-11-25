@@ -88,7 +88,7 @@ public:
 
     void layout(UiLayoutContext& context) override {
         // An empty list has nothing to show in a panel
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() && tracks.getCount() > 0 ? &panel : nullptr);
+        screenView.setSidePanel(tracks.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
     }
 

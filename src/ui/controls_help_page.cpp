@@ -133,12 +133,8 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        // With the source colours, the border takes the accent of the screen that the help explains
-        if (Theme_isSourceColoursEnabled()) {
-            dialog.setEdgeColor(Theme_getAccent(getHelpSource(helpId)));
-        } else {
-            dialog.clearEdgeColor();
-        }
+        // The border takes the accent of the screen that the help explains
+        dialog.setEdgeColor(Theme_getAccent(getHelpSource(helpId)));
         context.layoutChild(dialog, context.getMaxRect());
     }
 

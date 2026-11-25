@@ -26,12 +26,6 @@ void DialogFrameView::setEdgeColor(SDL_Color color) {
     dirty        = true;
 }
 
-void DialogFrameView::clearEdgeColor() {
-    if (!hasEdgeColor) return;
-    hasEdgeColor = false;
-    dirty        = true;
-}
-
 void DialogFrameView::setBorderless(bool value) {
     if (value == borderless) return;
     borderless = value;
@@ -44,21 +38,11 @@ void DialogFrameView::draw(UiDrawContext& context) {
     if (!surface) return;
     const int w      = surface->w;
     const int h      = surface->h;
-    if (Theme_isSourceColoursEnabled()) {
-        // The canvas rounds its surfaces at 28 px of 768: half of it at the scale of the device
-        const SDL_Color edge = hasEdgeColor ? edgeColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
-        renderRoundedRect(static_cast<uint32_t*>(surface->pixels), w, h, surface->pitch / 4,
-                          RoundedRectStyle{Theme_getColor(THEME_ROLE_SURFACE_BACKGROUND, false), edge,
-                                           borderless ? 0 : SCALE1(1), SCALE1(14)});
-        return;
-    }
-    const int border = SCALE1(2);
-    fill(surface, SDL_Rect{0, 0, w, h}, Theme_getColor(THEME_ROLE_SURFACE_BACKGROUND, false));
+    // The canvas rounds its surfaces at 28 px of 768: half of it at the scale of the device
     const SDL_Color edge = hasEdgeColor ? edgeColor : Theme_getColor(THEME_ROLE_PRIMARY, false);
-    fill(surface, SDL_Rect{0, 0, w, border}, edge);
-    fill(surface, SDL_Rect{0, h - border, w, border}, edge);
-    fill(surface, SDL_Rect{0, 0, border, h}, edge);
-    fill(surface, SDL_Rect{w - border, 0, border, h}, edge);
+    renderRoundedRect(static_cast<uint32_t*>(surface->pixels), w, h, surface->pitch / 4,
+                      RoundedRectStyle{Theme_getColor(THEME_ROLE_SURFACE_BACKGROUND, false), edge,
+                                       borderless ? 0 : SCALE1(1), SCALE1(14)});
 }
 
 DialogView::DialogView(int width, Alignment alignment, TTF_Font* titleFont, TTF_Font* hintFont)

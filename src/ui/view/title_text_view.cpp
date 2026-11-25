@@ -4,7 +4,6 @@
 #include <cstdint>
 
 void TitleTextView::setColor(SDL_Color color) {
-    regularColor = color;
     if (!heading) TextView::setColor(color);
 }
 
@@ -13,13 +12,6 @@ void TitleTextView::setHeading(TTF_Font* font, SDL_Color color) {
     heading = true;
     setFont(font);
     TextView::setColor(color);
-}
-
-void TitleTextView::clearHeading() {
-    if (!heading) return;
-    heading = false;
-    setFont(regularFont);
-    TextView::setColor(regularColor);
 }
 
 void TitleTextView::finishDraw(SDL_Surface* bitmap) {

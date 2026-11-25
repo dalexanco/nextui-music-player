@@ -58,8 +58,7 @@ public:
         RadioStation* stations;
         Radio_getStations(&stations);
         const RadioStation& station = stations[index];
-        std::string key = std::string(station.url) + '\n' + station.name + '\n' + station.genre +
-                          (Theme_isSourceColoursEnabled() ? "\n1" : "\n0");
+        std::string key = std::string(station.url) + '\n' + station.name + '\n' + station.genre;
         const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
         return it->second;
     }
@@ -70,13 +69,6 @@ public:
         const RadioStation& station = stations[index];
         auto row = std::make_shared<ListRowView>(Fonts_getMedium());
         row->setText(station.name);
-        // The detail panel of the new look carries the genre
-        if (station.genre[0] && !Theme_isSourceColoursEnabled()) {
-            auto genre = std::make_shared<TextView>(Fonts_getTiny(), false);
-            genre->setText(station.genre);
-            genre->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            row->setRightText(std::move(genre));
-        }
         return row;
     }
 
@@ -92,9 +84,6 @@ public:
         emptyState.setMessage("No stations saved");
         emptyState.setLine("Press Y to manage stations");
         screenView.setEmptyState(&emptyState);
-        for (TextView* note : {&noteFirst, &noteSecond}) note->setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        noteFirst.setText("These are default stations");
-        noteSecond.setText("Press Y to manage stations");
     }
 
     std::span<const ButtonRequest> getButtonRequests() const override {
@@ -126,18 +115,9 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        // The panel belongs to the source colours look, and the setting can change between frames
         // An empty list has nothing to show in a panel
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() && stations.getCount() > 0 ? &panel : nullptr);
+        screenView.setSidePanel(stations.getCount() > 0 ? &panel : nullptr);
         context.layoutChild(screenView, context.getMaxRect());
-        // The notes of the old look would run under the panel of the new one
-        if (Theme_isSourceColoursEnabled() || Radio_hasUserStations() || stations.getCount() == 0) return;
-        // The note ends one pill row above the row of the button hints
-        const int hintsTop    = context.getMaxSize().h - SCALE1(PADDING + PILL_SIZE);
-        const int secondY     = hintsTop - SCALE1(PILL_SIZE);
-        const int firstHeight = context.createMeasuringContext().layoutChild(noteFirst, context.getMaxRect()).getSize().h;
-        layoutCentered(context, noteFirst, secondY - firstHeight);
-        layoutCentered(context, noteSecond, secondY);
     }
 
     bool onButtonEvent(const ButtonEvent& event) override {
@@ -252,8 +232,6 @@ private:
     ListScreenView screenView{Fonts_getLarge()};
     EmptyStateView emptyState;
     DetailPanelView panel;
-    TextView noteFirst{Fonts_getTiny(), true};
-    TextView noteSecond{Fonts_getTiny(), true};
     ListScreenController list{screenView, getScheduler(), *this};
     bool radioReady = false;
 };

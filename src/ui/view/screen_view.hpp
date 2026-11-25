@@ -68,7 +68,7 @@ public:
     /**
      * Shows `panel` in the right third of the body, and lays out the content in the room that is
      * left. The view stays with the caller. Pass null for no panel. A page can set it again at
-     * each layout, as the "Source colours" setting changes.
+     * each layout.
      */
     void setSidePanel(UiView* panel) { sidePanel = panel; }
 

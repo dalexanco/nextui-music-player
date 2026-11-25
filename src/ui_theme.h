@@ -41,7 +41,7 @@ typedef enum {
 } ThemeRole;
 
 // The source of the content that a page shows. Each source has its own accent
-// and its own deep tone, which the "Source colours" setting puts on the status
+// and its own deep tone, which are on the status
 // pill, the hint pills and the page background.
 typedef enum {
     THEME_SOURCE_MUSIC,
@@ -66,20 +66,16 @@ SDL_Color Theme_getDeep(ThemeSource source);
 // the accent colour of the NextUI theme, and reads it from its configuration.
 // These functions replace it by the accent of a source around that drawing.
 //
-// The stack of pages sets the active source before each layout: enabled is the
-// "Source colours" setting, and source is the source of the top page.
+// The stack of pages sets the active source before each layout: it is the source
+// of the top page.
 void Theme_setSource(ThemeSource source);
 
-// True while the "Source colours" setting is on for the layout that runs.
-bool Theme_isSourceColoursEnabled(void);
-
-// The accent of the active source, packed as 0xRRGGBBAA, or 0 while source
-// colours are off. A view that draws a pill renders again when it changes.
+// The accent of the active source, packed as 0xRRGGBBAA. A view that draws a pill renders again when it changes.
 uint32_t Theme_getPillAccent(void);
 
 // Put the accent of the active source in the pill colour of the platform, for
-// the draw calls between the two functions. The first returns false and changes
-// nothing where source colours are off; call the second only after a true.
+// the draw calls between the two functions. The first always returns true; call
+// the second after it.
 // See the AccentPills class for the C++ form.
 bool Theme_beginAccentPills(void);
 void Theme_endAccentPills(void);

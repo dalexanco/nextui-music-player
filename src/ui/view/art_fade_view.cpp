@@ -52,18 +52,10 @@ void ArtFadeView::setSource(ThemeSource newSource) {
     dirty  = true;
 }
 
-bool ArtFadeView::isDirty() const { return dirty || drawnWithSourceColours != Theme_isSourceColoursEnabled(); }
-
 void ArtFadeView::draw(UiDrawContext& context) {
-    dirty                  = false;
-    drawnWithSourceColours = Theme_isSourceColoursEnabled();
-    SDL_Surface* surface   = context.getSurface();
+    dirty                = false;
+    SDL_Surface* surface = context.getSurface();
     if (!surface) return;
-    if (!drawnWithSourceColours) {
-        // The flat background of the old look: the art as it is, and no tile or fade
-        if (art && art->w > 0 && art->h > 0) drawCover(*art, *surface);
-        return;
-    }
     if (art && art->w > 0 && art->h > 0) {
         drawCover(*art, *surface);
     } else {

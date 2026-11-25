@@ -7,19 +7,16 @@
 #include "ui/view/ui_view.hpp"
 
 /**
- * The ground and the border of a dialog. With the setting "Source colours" off it is the flat
- * rectangle with a 2 px border of NextUI; with it on, a rounded surface (anti-aliased, see
- * renderRoundedRect()) with a thin edge, or with no edge for a panel.
+ * The ground and the border of a dialog: a rounded surface (anti-aliased, see renderRoundedRect())
+ * with a thin edge, or with no edge for a panel.
  */
 class DialogFrameView : public UiView {
 public:
-    /** Draws a panel with no edge in the rounded look. The square look keeps its border. */
+    /** Draws a panel with no edge. */
     void setBorderless(bool value);
 
     /** Draws the border in `color` in place of the primary color of the theme. */
     void setEdgeColor(SDL_Color color);
-    /** Goes back to the primary color of the theme. */
-    void clearEdgeColor();
 
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
@@ -47,7 +44,6 @@ public:
 
     /** Draws the border of the dialog in `color`. */
     void setEdgeColor(SDL_Color color) { frame.setEdgeColor(color); }
-    void clearEdgeColor() { frame.clearEdgeColor(); }
 
     /**
      * Shows content between the title and the hint, as high as its layout makes it. A centered

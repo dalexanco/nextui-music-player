@@ -8,9 +8,6 @@
  * The art of a player, over the right of the screen, with its left edge fading into the background.
  * It shows the bitmap that the owner gives, or a generated tile in the accent of its source. The
  * fade is the one of `getArtFadeAlpha()`.
- *
- * With the setting "Source colours" off the page keeps its flat background: the art shows with no
- * fade, and a player with no art shows nothing.
  */
 class ArtFadeView : public UiView {
 public:
@@ -19,15 +16,13 @@ public:
     /** Sets the source whose accent the generated tile takes. The default is Music. */
     void setSource(ThemeSource newSource);
 
-    bool isDirty() const override;
+    bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
 
 private:
     SDL_Surface* art    = nullptr;
     ThemeSource source  = THEME_SOURCE_MUSIC;
     bool dirty          = true;
-    /** The look of the last draw: the setting that it followed */
-    bool drawnWithSourceColours = true;
 };
 
 #endif

@@ -67,16 +67,11 @@ void ScreenView::setScrollingContent(ScrollingView* newContent, ContentMargins n
 }
 
 void ScreenView::layout(UiLayoutContext& context) {
-    // The heading look is a function of the setting at each layout, thus a change shows at once
-    if (Theme_isSourceColoursEnabled()) {
-        titleView.setHeading(Fonts_getHeading(), Theme_getColor(THEME_ROLE_PRIMARY, false));
-    } else {
-        titleView.clearHeading();
-    }
+    titleView.setHeading(Fonts_getHeading(), Theme_getColor(THEME_ROLE_PRIMARY, false));
     int bodyTop          = layoutScreenTop(context, titleView, statusView);
     // With the large title the board keeps 24 px of 768 between the row of the status pill and the
     // first row of the list (top at 128 under a status row that ends at 104)
-    if (Theme_isSourceColoursEnabled()) bodyTop += context.getMaxSize().h * 24 / 768;
+    bodyTop += context.getMaxSize().h * 24 / 768;
     const int bodyBottom = layoutScreenBottom(context, buttonHintsView);
     if (!content) return;
 

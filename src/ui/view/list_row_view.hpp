@@ -17,10 +17,8 @@
  * "...".
  *
  * A row can have a right view at its right edge, and the text then takes the space to the left of
- * it. A selected row with a right view shows a band under the whole row.
- *
- * With the "Source colours" setting on, the selected pill of such a row extends over the right view
- * in place of the band, and a right text that the row owns is muted while the row is not selected.
+ * it. The selected pill of such a row extends over the right view, and a right text that the row
+ * owns is muted while the row is not selected.
  */
 class ListRowView : public ListItemView {
 public:
@@ -34,8 +32,7 @@ public:
     void setRightView(std::shared_ptr<UiView> view);
     /**
      * Shows `text` at the right edge, as setRightView() does, and the row sets its color: the color
-     * of the selected row on the pill, and with source colours on, the secondary color otherwise.
-     * Without source colours the row leaves the color that the owner gave.
+     * of the selected row on the pill, and the secondary color otherwise.
      */
     void setRightText(std::shared_ptr<TextView> text);
     /**
@@ -69,9 +66,6 @@ private:
     std::shared_ptr<IconView> iconView;
     /** The right view when it is a text that the row colors, or null */
     std::shared_ptr<TextView> rightText;
-    /** The row changed the color of the right text, thus it must give it back */
-    bool rightTextRecolored = false;
-    bool extendedPill       = false;
     bool selected  = false;
     bool dirty     = true;
     /** The owner started the scroll and did not stop it */
@@ -80,8 +74,6 @@ private:
     bool longTextShown = false;
     int pillWidth  = 0;
     int pillHeight = 0;
-    /** The width of the band, which is 0 for a row with no right view */
-    int bandWidth  = 0;
 };
 
 #endif

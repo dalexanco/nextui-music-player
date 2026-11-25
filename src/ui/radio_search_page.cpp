@@ -149,7 +149,7 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        screenView.setSidePanel(Theme_isSourceColoursEnabled() ? &panel : nullptr);
+        screenView.setSidePanel(&panel);
         context.layoutChild(screenView, context.getMaxRect());
     }
 

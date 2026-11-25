@@ -31,32 +31,15 @@ void OptionsPanelView::setRows(const std::vector<OptionRow>& newRows) {
 
 void OptionsPanelView::buildViews() {
     const int selected = std::max(0, listView.getSelectedIndex());
-    rounded            = Theme_isSourceColoursEnabled();
     viewsStale         = false;
     adapter.views.clear();
-    adapter.valueViews.clear();
     adapter.optionViews.clear();
     for (const OptionRow& row : adapter.rows) {
-        if (rounded) {
-            auto view = std::make_shared<OptionRowView>(row.label);
-            adapter.views.push_back(view);
-            adapter.optionViews.push_back(std::move(view));
-            adapter.valueViews.push_back(nullptr);
-            continue;
-        }
-        auto view = std::make_shared<ListRowView>(Fonts_getMedium());
-        view->setText(row.label);
-        std::shared_ptr<TextView> value;
-        if (!row.value.empty()) {
-            value = std::make_shared<TextView>(Fonts_getMedium(), false);
-            value->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            view->setRightText(value);
-        }
-        adapter.views.push_back(std::move(view));
-        adapter.valueViews.push_back(std::move(value));
-        adapter.optionViews.push_back(nullptr);
+        auto view = std::make_shared<OptionRowView>(row.label);
+        adapter.views.push_back(view);
+        adapter.optionViews.push_back(std::move(view));
     }
-    frame.setBorderless(rounded);
+    frame.setBorderless(true);
     listView.notifyDataChanged();
     listView.setSelectedIndex(std::min(selected, std::max(0, getRowCount() - 1)));
     refreshValues();
@@ -76,27 +59,17 @@ void OptionsPanelView::moveSelection(int direction) {
 }
 
 void OptionsPanelView::refreshValues() {
-    const int selected = listView.getSelectedIndex();
-    for (size_t index = 0; index < adapter.rows.size(); index++) {
-        if (adapter.optionViews[index]) {
-            adapter.optionViews[index]->setValue(adapter.rows[index].value);
-            continue;
-        }
-        const auto& value = adapter.valueViews[index];
-        if (!value) continue;
-        const std::string& text = adapter.rows[index].value;
-        value->setText(static_cast<int>(index) == selected ? "\xe2\x80\xb9 " + text + " \xe2\x80\xba" : text);
-    }
+    for (size_t index = 0; index < adapter.rows.size(); index++) adapter.optionViews[index]->setValue(adapter.rows[index].value);
 }
 
 void OptionsPanelView::layout(UiLayoutContext& context) {
-    if (viewsStale || rounded != Theme_isSourceColoursEnabled()) buildViews();
+    if (viewsStale) buildViews();
     refreshValues();
     const UiSize screen        = context.getMaxSize();
     UiLayoutContext measuring  = context.createMeasuringContext();
     const int padding          = SCALE1(PADDING);
     const int headerHeight     = measuring.layoutChild(titleView, SDL_Rect{0, 0, screen.w, screen.h}).getSize().h + padding;
-    const int rowHeight        = rounded ? SCALE1(PILL_SIZE) * 14 / 15 : SCALE1(PILL_SIZE);
+    const int rowHeight        = SCALE1(PILL_SIZE) * 14 / 15;
     const int bottomLimit      = screen.h - padding - SCALE1(PILL_SIZE) - padding;
     const OptionsPanelRects rects = layoutOptionsPanel(screen.w, screen.h, padding, headerHeight, rowHeight, getRowCount(), bottomLimit);
 
