@@ -21,7 +21,7 @@
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
 #include "ui/view/list_screen_view.hpp"
-#include "ui/view/star_icon.hpp"
+#include "ui/view/heart_icon.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/wifi_dialog_page.hpp"
 #include "ui_fonts.h"
@@ -60,7 +60,7 @@ public:
         const RadioStation& station = stations[index];
         auto row = std::make_shared<ListRowView>(Fonts_getMedium());
         row->setText(station.name);
-        if (RadioFavourites_isFavourite(station.url)) row->setIcon(getStarIcon(false), getStarIcon(true));
+        if (RadioFavourites_isFavourite(station.url)) row->setIcon(getHeartIcon(false), getHeartIcon(true));
         return row;
     }
 

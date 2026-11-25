@@ -7,8 +7,20 @@
 
 namespace {
 
-/** The side of the surface, in pixels before the scale of the screen */
-constexpr int kSide = 24;
+/**
+ * The side of the surface, in pixels. The row blits it scaled in a square of 24 units of the screen,
+ * thus a fine surface keeps the edges smooth where a surface of 24 pixels showed its steps.
+ */
+constexpr int kSide = 96;
+/** A pixel counts kSamples x kSamples samples, for the smooth edge */
+constexpr int kSamples = 4;
+/**
+ * The outer radius of the star, as a part of the side. The star leaves a margin in its square, so it
+ * reads as a mark next to the text instead of filling the whole height of the row.
+ */
+constexpr float kOuterRadius = 0.32f;
+/** The inner radius, as a part of the outer one */
+constexpr float kInnerRatio = 0.45f;
 
 struct Point {
     float x;
@@ -29,20 +41,29 @@ bool isInside(const std::array<Point, 10>& polygon, float x, float y) {
 SDL_Surface* drawStar(SDL_Color color) {
     SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, kSide, kSide, 32, SDL_PIXELFORMAT_ARGB8888);
     if (!surface) return nullptr;
-    SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, color.r, color.g, color.b, 0));
     constexpr float pi = 3.14159265f;
     std::array<Point, 10> star{};
     for (size_t i = 0; i < star.size(); i++) {
-        const float radius = i % 2 == 0 ? kSide * 0.5f : kSide * 0.22f;
+        const float outer  = kSide * kOuterRadius;
+        const float radius = i % 2 == 0 ? outer : outer * kInnerRatio;
         const float angle  = -pi / 2 + static_cast<float>(i) * pi / 5;
-        star[i]            = Point{kSide * 0.5f + radius * std::cos(angle), kSide * 0.54f + radius * std::sin(angle)};
+        // The centre sits a little low: the visual weight of a star is in its lower half
+        star[i] = Point{kSide * 0.5f + radius * std::cos(angle), kSide * 0.53f + radius * std::sin(angle)};
     }
-    const Uint32 ink = SDL_MapRGBA(surface->format, color.r, color.g, color.b, color.a);
+    auto* pixels = static_cast<Uint32*>(surface->pixels);
+    const int pitch = surface->pitch / static_cast<int>(sizeof(Uint32));
     for (int y = 0; y < kSide; y++) {
         for (int x = 0; x < kSide; x++) {
-            if (!isInside(star, static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f)) continue;
-            SDL_Rect pixel{x, y, 1, 1};
-            SDL_FillRect(surface, &pixel, ink);
+            int covered = 0;
+            for (int sy = 0; sy < kSamples; sy++) {
+                for (int sx = 0; sx < kSamples; sx++) {
+                    const float px = static_cast<float>(x) + (static_cast<float>(sx) + 0.5f) / kSamples;
+                    const float py = static_cast<float>(y) + (static_cast<float>(sy) + 0.5f) / kSamples;
+                    if (isInside(star, px, py)) covered++;
+                }
+            }
+            const Uint8 alpha = static_cast<Uint8>(covered * color.a / (kSamples * kSamples));
+            pixels[y * pitch + x] = SDL_MapRGBA(surface->format, color.r, color.g, color.b, alpha);
         }
     }
     return surface;
